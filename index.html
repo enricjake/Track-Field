@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>HYPER OLYMPIC · 100m DASH</title>
+<title>HYPER OLYMPIC · 100m DASH & 110m HURDLES</title>
 <style>
   html,body{margin:0;background:#20232b;color:#eee;font-family:ui-monospace,Menlo,Consolas,monospace}
   #wrap{display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:8px;gap:6px}
@@ -18,42 +18,74 @@
 </head>
 <body>
 <div id="wrap">
-  <h1>★ HYPER OLYMPIC ★  100M DASH ★</h1>
+  <h1>★ HYPER OLYMPIC ★  TRACK & FIELD ★</h1>
   <canvas id="c" width="256" height="240"></canvas>
   <div id="hud">
-    <b>← →</b> or <b>Z X</b> alternate rapidly to run &nbsp;·&nbsp; <b>Enter</b> start/continue &nbsp;·&nbsp; <b>M</b> mute
+    <b>← →</b> or <b>Z X</b> alternate rapidly to run &nbsp;·&nbsp; <b>↑ / Space</b> jump hurdle &nbsp;·&nbsp; <b>Enter</b> start/continue &nbsp;·&nbsp; <b>M</b> mute
   </div>
 </div>
 <script>
 "use strict";
 /* ============================================================================
-   HYPER OLYMPIC — Track & Field 100m Dash, faithful single-file HTML5 clone.
+   HYPER OLYMPIC — Track & Field, faithful single-file HTML5 clone.
    A spiritual/technical 1:1 of Konami's 1987 NES release "Track & Field".
+   Events implemented: 100m Dash, 110m Hurdles.
    Everything drawn procedurally. No external assets.
    ============================================================================ */
 
-// ---- TUNABLE CONSTANTS (1:1 NES Track & Field 100m dash) --------------------
+// ---- CORE CONSTANTS ---------------------------------------------------------
 const VIEW_W = 256, VIEW_H = 240;          // native NES-ish viewport
 const FPS = 60;
-const TRACK_LEN_M = 100;                    // race distance
-const QUALIFY_TIME = 11.50;                  // seconds to advance [NES]
-const WR_TIME = 9.95;                        // world-record display [NES era]
+const TRACK_LANE_TOP = 128, TRACK_LANE_BOT = 164;
 const START_LIVES = 3;                       // 3 lives
 const EXTRA_LIFE_EVERY = 100000;             // +1 life per 100k (arcade rule)
+const SCORE_PER_QUALIFY = 5000;              // base for qualifying
+const SCORE_BONUS_PER_SEC = 1000;             // bonus pts per second under qualify
+const WR_BONUS = 10000;                       // new world-record bonus
+const HURDLE_CLEAR_BONUS = 1000;              // per clean hurdle cleared
+
+// ---- SHARED RUN PHYSICS (used by every running event) -----------------------
 const START_SPEED = 0.0;                     // meters per frame at the gun
-const MAX_SPEED = 0.165;                      // m / frame  (~9.9 m/s, gives ~10.1s WR pace)
+const MAX_SPEED = 0.165;                      // m / frame  (~9.9 m/s)
 const PRESS_GAIN = 0.027;                     // meters added per *alternating* press
 const FRICTION = 0.97;                        // per-frame decay when not pressing
-const FALSE_START_DELAY = 1.0;               // seconds, recycled after false start
-const SCORE_PER_QUALIFY = 5000;               // base for qualifying
-const SCORE_BONUS_PER_SEC = 1100;             // bonus pts per second under QUALIFY_TIME
-const WR_BONUS = 10000;                       // new world-record bonus
+const CPU_TARGET_TIME_100 = 11.20;            // computer rival pace for 100m
+
+// ---- EVENT DEFINITIONS ------------------------------------------------------
+// The NES game advances: 100m dash -> 110m hurdles -> (long jump -> ...).
+// Each event carries its own constants + a type that selects update/render.
+const EVENTS = [
+  {
+    id:"DASH100", name:"100M DASH",
+    distance: 100,
+    qualifyTime: 11.50,
+    wrTime: 9.95,
+    cpuTargetTime: CPU_TARGET_TIME_100,
+    type:"run",
+    obstacles: null,
+  },
+  {
+    id:"HURDLES110", name:"110M HURDLES",
+    distance: 110,
+    qualifyTime: 15.20,
+    wrTime: 13.20,
+    cpuTargetTime: 15.40,
+    type:"hurdles",
+    // 10 hurdles evenly spaced between 11m and 100m (inclusive) -> stride ~9.89m
+    obstacles: (() => {
+      const n = 10, first = 11, last = 100, arr = [];
+      for (let i=0;i<n;i++) arr.push(first + (last-first)*i/(n-1));
+      return arr;
+    })(),
+  },
+];
+let eventIndex = 0;
+function curEvent(){ return EVENTS[eventIndex]; }
 
 // ---- DOM / CANVAS ----------------------------------------------------------
 const cv = document.getElementById("c");
 const ctx = cv.getContext("2d");
 ctx.imageSmoothingEnabled = false;
-const dbg = document.getElementById("hud");
 
 // ---- INPUT -----------------------------------------------------------------
 const keys = Object.create(null);
@@ -61,11 +93,14 @@ const pressedThisFrame = Object.create(null);  // one-shot edge events
 let lastRunKey = null;                          // enforces alternation (no double-same)
 window.addEventListener("keydown", e => {
   const k = e.key;
-  // prevent page scroll on arrows / space
   if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(k)) e.preventDefault();
   if (!keys[k]) pressedThisFrame[k] = true;
   keys[k] = true;
   if (k === "m" || k === "M") { Audio.ensure(); Audio.toggleMute(); }
+  if (k === "r" || k === "R") {
+    // dev shortcut: warp to next event from title (kept harmless)
+    if (scene === Scene.TITLE) { eventIndex = (eventIndex+1)%EVENTS.length; }
+  }
 },{passive:false});
 window.addEventListener("keyup", e => { keys[e.key] = false; });
 
@@ -73,13 +108,24 @@ window.addEventListener("keyup", e => { keys[e.key] = false; });
 function consumeRunPress() {
   const leftEdge  = pressedThisFrame["ArrowLeft"]  || pressedThisFrame["z"] || pressedThisFrame["Z"];
   const rightEdge = pressedThisFrame["ArrowRight"] || pressedThisFrame["x"] || pressedThisFrame["X"];
-  // consume the edges we observe this frame
   if (leftEdge){ pressedThisFrame["ArrowLeft"]=false; pressedThisFrame["z"]=false; pressedThisFrame["Z"]=false;}
   if (rightEdge){ pressedThisFrame["ArrowRight"]=false; pressedThisFrame["x"]=false; pressedThisFrame["X"]=false;}
-  if (leftEdge && rightEdge) return null;             // both same frame = ignore
+  if (leftEdge && rightEdge) return null;
   if (leftEdge)  { if (lastRunKey === "L") return null; lastRunKey="L"; return "L"; }
   if (rightEdge) { if (lastRunKey === "R") return null; lastRunKey="R"; return "R"; }
   return null;
+}
+// Single-shot jump edge (Up or Space), consumed by the hurdles event.
+function consumeJumpPress() {
+  const j = pressedThisFrame["ArrowUp"] || pressedThisFrame[" "];
+  if (j){ pressedThisFrame["ArrowUp"]=false; pressedThisFrame[" "]=false; return true; }
+  return false;
+}
+function enterPressed(){
+  // Enter is the canonical confirm. Up/Space are NOT confirms now (they jump).
+  const e = pressedThisFrame["Enter"];
+  if (e){ pressedThisFrame["Enter"]=false; return true; }
+  return false;
 }
 
 // ---- AUDIO (procedural, Web Audio) -----------------------------------------
@@ -112,13 +158,13 @@ const Audio = (() => {
   }
   function gunshot(){ noise(0.18,0.30,180,0.7); blip(90,0.18,"square",0.22); }
   function beep(f){ blip(f,0.08,"square",0.28); }
-  function cheer(){
-    // softer, longer crowd ambience
-    noise(1.2,0.08,900,0.5);
-    noise(0.9,0.06,1600,0.4);
+  function cheer(){ noise(1.2,0.08,900,0.5); noise(0.9,0.06,1600,0.4); }
+  function thud(){ // hurdle knock
+    noise(0.12,0.35,260,0.8); blip(140,0.10,"sawtooth",0.18);
   }
-  function fanfare(){}
-  // --- Simple "Olympic-style" original 4-note triumphant motif (not Chariots) ---
+  function jumpSfx(){ blip(520,0.10,"triangle",0.22); blip(720,0.08,"triangle",0.16); }
+  function landSfx(){ blip(220,0.05,"square",0.18); }
+  // --- Simple original "Olympic-style" 4-note motif (not Chariots) ---
   let musicTimer=null, musicOn=false;
   const motif = [ [0,392,0.22],[0.22,440,0.22],[0.44,587,0.34],[0.78,523,0.55] ];
   function stopMusic(){ musicOn=false; if(musicTimer){clearInterval(musicTimer);musicTimer=null;} }
@@ -128,7 +174,6 @@ const Audio = (() => {
     let i=0;
     const loop = () => {
       if(!musicOn) return;
-      // notes play with a 1.6s loop
       const t = (i/8) % 1.6;
       motif.forEach(([at,f,d])=>{ if(Math.abs(t-at)<0.02) blip(f,d*0.9,"triangle",0.10,musicGain); });
       i += 0.2;
@@ -137,7 +182,7 @@ const Audio = (() => {
     musicTimer = setInterval(loop, 200);
   }
   return {
-    ensure, gunshot, beep, cheer,
+    ensure, gunshot, beep, cheer, thud, jumpSfx, landSfx,
     startMusic, stopMusic,
     toggleMute(){ muted=!muted; if(master) master.gain.value = muted?0:0.5; return muted; },
     resume(){ if(ctx && ctx.state==="suspended") ctx.resume(); }
@@ -145,47 +190,60 @@ const Audio = (() => {
 })();
 
 // ---- GAME STATE -------------------------------------------------------------
-const Scene = { TITLE:"TITLE", COUNTDOWN:"COUNTDOWN", RACE:"RACE", FINISH:"FINISH", GAMEOVER:"GAMEOVER" };
+const Scene = { TITLE:"TITLE", EVENTCARD:"EVENTCARD", COUNTDOWN:"COUNTDOWN", RACE:"RACE", FINISH:"FINISH", GAMEOVER:"GAMEOVER" };
 let scene = Scene.TITLE;
 let lives = START_LIVES;
 let score = 0;
 let scoreDisplay = 0;             // for animated counter
 let blinkT = 0;
 let frameAccum = 0;               // fixed-timestep accumulator (ms)
+let cardT = 0;                     // event-card dwell timer
 
-// Race/runtime state (reset by startRace)
-let run = null;
+let run = null;                    // current race state
 
 function newRunner(){
   return {
-    x: 0,                  // meters from start line
-    vx: START_SPEED,       // meters per frame
+    x: 0,
+    vx: START_SPEED,
     frameIdx: 0,
     frameTimer: 0,
-    lastPress: null,        // "L"|"R"
-    presses: 0,             // total alternating presses (debug)
+    lastPress: null,
+    presses: 0,
     finished: false,
-    finishTime: 0,          // seconds
+    finishTime: 0,
+    // hurdles-only
+    airborne:false,                 // true while in jump arc
+    jumpT:0,                        // time since jump start (seconds)
+    jumpVy:0,                        // initial upward velocity (visual)
+    jumpHeight:0,                    // current height (px)
+    hurdlesCleared:0,
+    hurdlesHit:0,
+    stumbleT:0,                      // remaining stumble/stun time
   };
 }
 
 function startRace(){
-  run = { player:newRunner(), cpu:newRunner(),
-          clock:0,                    // seconds elapsed since gun
-          phase:"countdown",          // countdown -> running -> done
-          countdownT: 3.0,            // READY.. countdown
-          falseStart:false,
-          finished:false,
-          newWR:false,
-         Qualified:false,
-          awardedScore:0,
-          scroll:0,                   // background scroll in pixels
+  const ev = curEvent();
+  run = {
+    ev: ev,
+    player:newRunner(),
+    cpu:newRunner(),
+    clock:0,
+    phase:"countdown",
+    countdownT: 3.0,
+    finished:false,
+    Qualified:false,
+    newWR:false,
+    awardedScore:0,
+    scroll:0,
+    clearFlags: ev.obstacles ? ev.obstacles.map(()=>false) : null,
+    hitFlags:   ev.obstacles ? ev.obstacles.map(()=>false) : null,
   };
 }
 
-// CPU runs at a steady pace to give the player a visual rival.
-const CPU_TARGET_TIME = 11.20;    // computer rival pace (≈ qualifying-ish speed)
-const CPU_SPEED = TRACK_LEN_M / (CPU_TARGET_TIME * FPS);
+// CPU rival: constant pace with a slight wobble for life.
+// For hurdles, the CPU auto-clears each hurdle (cosmetic — it's a rival gauge).
+const CPU_BASE_FRAC = 1.0; // cpuTargetTime governs pace directly
 
 // ---- MAIN LOOP --------------------------------------------------------------
 let last = performance.now();
@@ -193,13 +251,10 @@ function loop(now){
   let dt = now - last; last = now;
   if (dt > 250) dt = 250;
   frameAccum += dt;
-  // Fixed-timestep 60Hz updates
   let steps = 0;
   while (frameAccum >= 1000/FPS && steps < 5){
     update(1/60);
     frameAccum -= 1000/FPS; steps++;
-    // Clear one-shot edges ONLY when an update step actually ran,
-    // so a press captured between rAF ticks isn't lost if no step executes.
     for (const k in pressedThisFrame) pressedThisFrame[k]=false;
   }
   render();
@@ -211,23 +266,22 @@ requestAnimationFrame(loop);
 function update(dt){
   blinkT += dt;
   Audio.resume();
-  // animated score display
   if (scoreDisplay < score) scoreDisplay = Math.min(score, scoreDisplay + Math.max(1, Math.ceil((score-scoreDisplay)/12)));
 
   switch(scene){
     case Scene.TITLE:
-      if (enterPressed()) { Audio.ensure(); Audio.startMusic(); scene = Scene.COUNTDOWN; prepareRace(); }
+      if (enterPressed()) { Audio.ensure(); Audio.startMusic(); eventIndex=0; gotoEventCard(); }
+      break;
+    case Scene.EVENTCARD:
+      cardT -= dt;
+      if (cardT <= 0 || enterPressed()) { startRace(); scene = Scene.COUNTDOWN; }
       break;
     case Scene.COUNTDOWN:
       updateCountdown(dt); break;
     case Scene.RACE:
       updateRace(dt); break;
     case Scene.FINISH:
-      if (enterPressed()) {
-        if (run.Qualified) { prepareRace(); scene = Scene.COUNTDOWN; }
-        else if (lives > 0) { prepareRace(); scene = Scene.COUNTDOWN; }
-        else scene = Scene.GAMEOVER;
-      }
+      if (enterPressed()) advanceAfterFinish();
       break;
     case Scene.GAMEOVER:
       if (enterPressed()) resetGame();
@@ -235,23 +289,39 @@ function update(dt){
   }
 }
 
-function enterPressed(){
-  const e = pressedThisFrame["Enter"] || pressedThisFrame[" "] || pressedThisFrame["ArrowUp"];
-  if (e){ pressedThisFrame["Enter"]=false; pressedThisFrame[" "]=false; pressedThisFrame["ArrowUp"]=false; return true; }
-  return false;
-}
+function gotoEventCard(){ scene = Scene.EVENTCARD; cardT = 2.4; }
 
-function prepareRace(){
-  startRace();
+function advanceAfterFinish(){
+  // Lives/lives & advance rules (preserved from v1, generalized)
+  if (run.Qualified) {
+    // advance to next event
+    eventIndex++;
+    if (eventIndex >= EVENTS.length) {
+      // beat the game -> loop back to dash with bonus-style fanfare scene
+      eventIndex = 0;
+      scene = Scene.GAMEOVER; // we re-use game over as a "COMPLETE" later? keep simple: loop
+      // Actually present a "GAME CLEAR" feel by going to title? Keep loop to first event.
+      gotoEventCard();
+    } else {
+      gotoEventCard();
+    }
+  } else {
+    if (lives > 0) {
+      // retry same event
+      gotoEventCard();
+    } else {
+      scene = Scene.GAMEOVER;
+    }
+  }
 }
 
 function updateCountdown(dt){
-  // consume any run presses during countdown so they don't sneak into the race early
-  consumeRunPress();
+  // consume any run presses during countdown so they don't sneak in early
+  consumeRunPress(); consumeJumpPress();
   run.countdownT -= dt;
   if (run.countdownT <= 0){
     run.phase = "running";
-    scene = Scene.RACE;          // << the actual bug: race never started as a scene
+    scene = Scene.RACE;
     Audio.gunshot();
   } else if (run.countdownT <= 2.0 && !run._beeped2){ run._beeped2=true; Audio.beep(660); }
   else if (run.countdownT <= 1.0 && !run._beeped1){ run._beeped1=true; Audio.beep(740); }
@@ -259,54 +329,103 @@ function updateCountdown(dt){
 
 function updateRace(dt){
   if (run.phase !== "running") return;
+  const ev = run.ev;
 
-  // FALSE START: a press during countdown rises above ~0 speed early already handled.
-  // Read player input (alternating buttons)
+  // ---- PLAYER INPUT ----
   const p = consumeRunPress();
-  if (p){
+  if (run.player.stumbleT > 0) {
+    run.player.stumbleT -= dt;
+    // stumble: severely reduced input effect, heavy friction
+    run.player.vx *= 0.86;
+    if (run.player.vx < 0) run.player.vx = 0;
+  } else if (p){
     run.player.lastPress = p;
     run.player.presses++;
-    // apply speed gain, capped at MAX_SPEED
     run.player.vx = Math.min(MAX_SPEED, run.player.vx + PRESS_GAIN);
-    // sprite frame advances every press
     run.player.frameIdx = (run.player.frameIdx + 1) % 4;
   } else {
-    // only decay when no press registered this frame (a press = muscle firing)
     run.player.vx *= FRICTION;
     if (run.player.vx < 0) run.player.vx = 0;
   }
+
+  // Jump handling only for hurdles
+  if (ev.type === "hurdles") {
+    if (!run.player.airborne && run.player.stumbleT <= 0 && consumeJumpPress()) {
+      run.player.airborne = true;
+      run.player.jumpT = 0;
+      run.player.jumpVy = 1.9;     // tune arc height/duration
+      Audio.jumpSfx();
+    }
+    if (run.player.airborne) {
+      run.player.jumpT += dt;
+      // parabola: h = vy*t - 0.5*g*t^2 (t in seconds, scaled to px)
+      const g = 7.0;
+      run.player.jumpHeight = Math.max(0, run.player.jumpVy*run.player.jumpT - 0.5*g*run.player.jumpT*run.player.jumpT);
+      if (run.player.jumpHeight <= 0 && run.player.jumpT > 0.05) {
+        run.player.airborne = false;
+        run.player.jumpHeight = 0;
+        Audio.landSfx();
+      }
+    }
+  }
+
+  // advance positions
   run.player.x += run.player.vx;
 
-  // CPU rival: constant pace, slight wobble for life
-  run.cpu.vx = CPU_SPEED * (1 + 0.04*Math.sin(run.clock*4));
+  // CPU rival pace (auto-clears hurdles cosmetically)
+  const cpuSpeed = ev.distance / (ev.cpuTargetTime * FPS);
+  run.cpu.vx = cpuSpeed * (1 + 0.04*Math.sin(run.clock*4));
   run.cpu.x += run.cpu.vx;
 
-  // clock
   run.clock += dt;
 
-  // CPU sprite animation by distance travelled
+  // CPU sprite animation (frame rate slightly faster when ahead)
   run.cpu.frameTimer += dt;
   if (run.cpu.frameTimer > 0.08){ run.cpu.frameTimer = 0; run.cpu.frameIdx = (run.cpu.frameIdx + 1) % 4; }
 
+  // ---- HURDLE COLLISION RESOLUTION (player) ----
+  if (ev.type === "hurdles" && run.clearFlags) {
+    const mToPx = (VIEW_W-40) / ev.distance;
+    for (let i=0;i<ev.obstacles.length;i++){
+      if (run.clearFlags[i] || run.hitFlags[i]) continue;
+      const hx = ev.obstacles[i];
+      const dx = run.player.x - hx;
+      // contact window: player is within hurdle footprint (about 1m)
+      if (Math.abs(dx) < 0.6) {
+        // did the player clear it? needs to be airborne at this x
+        if (run.player.airborne && run.player.jumpHeight > 4) {
+          run.clearFlags[i] = true;
+          run.player.hurdlesCleared++;
+          score += HURDLE_CLEAR_BONUS; // immediate reward
+          Audio.beep(900);
+        } else if (!run.player.airborne) {
+          // hit the hurdle: lose speed, stumble
+          run.hitFlags[i] = true;
+          run.player.hurdlesHit++;
+          run.player.vx *= 0.35;
+          run.player.stumbleT = 0.45;
+          Audio.thud();
+        }
+      }
+    }
+  }
+
   // scroll world so player stays ~left third
-  const trackPx = VIEW_W - 40;       // 100m maps to this pixel span roughly
-  const mToPx = trackPx / TRACK_LEN_M;
+  const mToPx = (VIEW_W-40) / ev.distance;
   run.scroll = Math.max(0, run.player.x * mToPx - 60);
 
-  // finish check
-  if (!run.player.finished && run.player.x >= TRACK_LEN_M){
+  // finish checks
+  if (!run.player.finished && run.player.x >= ev.distance){
     run.player.finished = true;
     run.player.finishTime = run.clock;
   }
-  if (!run.cpu.finished && run.cpu.x >= TRACK_LEN_M){
+  if (!run.cpu.finished && run.cpu.x >= ev.distance){
     run.cpu.finished = true;
     run.cpu.finishTime = run.clock;
   }
-
   if (run.player.finished){
     finishRace();
-  } else if (run.clock > 20.0){
-    // safety: didn't cross line — force a DNF-style finish
+  } else if (run.clock > 30.0){
     run.player.finishTime = run.clock;
     finishRace();
   }
@@ -315,24 +434,25 @@ function updateRace(dt){
 function finishRace(){
   run.phase = "done";
   Audio.cheer();
+  const ev = run.ev;
   const t = run.player.finishTime;
-  run.Qualified = (t <= QUALIFY_TIME);
-  run.newWR = (t < WR_TIME);
+  run.Qualified = (t <= ev.qualifyTime);
+  run.newWR = (t < ev.wrTime);
 
   let pts = 0;
   if (run.Qualified){
-    pts = SCORE_PER_QUALIFY + Math.floor((QUALIFY_TIME - t) * SCORE_BONUS_PER_SEC);
+    pts = SCORE_PER_QUALIFY + Math.floor((ev.qualifyTime - t) * SCORE_BONUS_PER_SEC);
+    if (ev.type === "hurdles") pts += run.player.hurdlesCleared * HURDLE_CLEAR_BONUS;
     if (run.newWR) pts += WR_BONUS;
   } else {
-    pts = Math.max(0, Math.floor((20.0 - t) * 100));
+    pts = Math.max(0, Math.floor((30.0 - t) * 100));
+    if (ev.type === "hurdles") pts += run.player.hurdlesCleared * 200;
   }
   run.awardedScore = pts;
   score += pts;
-  // lives
   if (!run.Qualified) lives = Math.max(0, lives - 1);
-  // extra life every 100k (arcade rule)
+  // extra life every 100k
   while (score > 0 && score - pts < (Math.floor(score/EXTRA_LIFE_EVERY))*EXTRA_LIFE_EVERY
-                    && score >= (Math.floor(score/EXTRA_LIFE_EVERY))*EXTRA_LIFE_EVERY
                     && (Math.floor((score-pts)/EXTRA_LIFE_EVERY) < Math.floor(score/EXTRA_LIFE_EVERY))) {
     lives++;
     Audio.beep(880);
@@ -343,6 +463,7 @@ function finishRace(){
 function resetGame(){
   lives = START_LIVES;
   score = 0; scoreDisplay = 0;
+  eventIndex = 0;
   scene = Scene.TITLE;
   Audio.stopMusic();
 }
@@ -355,6 +476,7 @@ function render(){
   ctx.fillStyle = "#000"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
   switch(scene){
     case Scene.TITLE: renderTitle(); break;
+    case Scene.EVENTCARD: renderTrackBg(); renderEventCard(); break;
     case Scene.COUNTDOWN: renderTrack(); renderCountdownOverlay(); break;
     case Scene.RACE: renderTrack(); renderHUD(); break;
     case Scene.FINISH: renderTrack(); renderFinishOverlay(); break;
@@ -369,115 +491,181 @@ const P = {
   track:"#b86c1c", trackLine:"#fff", trackInfield:"#3aa03a", trackShadow:"#8c4a14",
   red:"#e83820", yellow:"#ffce5e", white:"#fff", black:"#000", tan:"#f4c080",
   scoreboard:"#0820a0", sbLight:"#3868d8",
-  baton:"#ffd070",
+  baton:"#ffd070", hurdle:"#e8d090", hurdleShadow:"#7c5c30",
   p1:"#fcfcfc", p2:"#f0c060",
   text:"#fff",
 };
 
-// Sprite: stick athlete that uses frame index 0..3 to alternate leg/arm.
-// drawAthlete(cx, groundY, frame, dir, skinShirt)
-function drawAthlete(cx, gy, frame, dir, shirt){
-  // dir: +1 facing right
+// Athlete: frame 0..3 alternates legs/arms. If airborne, tuck pose.
+function drawAthlete(cx, gy, frame, dir, shirt, airborne=false, jumpH=0){
   ctx.save();
-  ctx.translate(cx, gy);
-  // legs alternate per frame (sine anim). Arm swings opposite.
-  const legSwing = Math.sin(frame * Math.PI/2) * 4;
-  // head (skin)
-  ctx.fillStyle = P.tan;
-  ctx.beginPath(); ctx.arc(0, -26, 4, 0, 7); ctx.fill();
-  // body (shirt)
-  ctx.fillStyle = shirt;
-  ctx.fillRect(-3, -22, 6, 10);
-  // legs
-  ctx.strokeStyle = "#5c4c3c"; ctx.lineWidth = 2; ctx.lineCap = "round";
-  ctx.beginPath();
-  ctx.moveTo(-1, -12); ctx.lineTo(-2 - legSwing, -2);
-  ctx.moveTo( 1, -12); ctx.lineTo( 2 + legSwing, -2);
-  ctx.stroke();
-  // arms (swing opposite to legs)
-  ctx.beginPath();
-  ctx.moveTo(0, -20); ctx.lineTo( 4 + legSwing, -14);
-  ctx.moveTo(0, -20); ctx.lineTo(-4 - legSwing, -14);
-  ctx.stroke();
+  ctx.translate(cx, gy - jumpH);
+  if (airborne) {
+    // tucked jump pose: legs up, arms forward
+    ctx.fillStyle = P.tan;
+    ctx.beginPath(); ctx.arc(0, -27, 4, 0, 7); ctx.fill();
+    ctx.fillStyle = shirt;
+    ctx.fillRect(-3, -23, 6, 9);
+    ctx.strokeStyle = "#5c4c3c"; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath();
+    // legs tucked forward
+    ctx.moveTo(-1, -14); ctx.lineTo( 5, -10);
+    ctx.moveTo( 1, -14); ctx.lineTo( 6, -6);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -21); ctx.lineTo( 5, -19);
+    ctx.moveTo(0, -21); ctx.lineTo(-5, -19);
+    ctx.stroke();
+  } else {
+    const legSwing = Math.sin(frame * Math.PI/2) * 4;
+    ctx.fillStyle = P.tan;
+    ctx.beginPath(); ctx.arc(0, -26, 4, 0, 7); ctx.fill();
+    ctx.fillStyle = shirt;
+    ctx.fillRect(-3, -22, 6, 10);
+    ctx.strokeStyle = "#5c4c3c"; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-1, -12); ctx.lineTo(-2 - legSwing, -2);
+    ctx.moveTo( 1, -12); ctx.lineTo( 2 + legSwing, -2);
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(0, -20); ctx.lineTo( 4 + legSwing, -14);
+    ctx.moveTo(0, -20); ctx.lineTo(-4 - legSwing, -14);
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
+// Hurdle sprite: a small white-and-orange wooden hurdle drawn at the lane.
+function drawHurdle(px, laneY){
+  // base x is the hurdle center; draw a 6px wide, 14px tall hurdle
+  const w = 6, h = 12;
+  ctx.fillStyle = P.hurdleShadow;
+  ctx.fillRect(px-1, laneY-2, 8, 2);            // shadow on track
+  ctx.fillStyle = P.hurdle;
+  ctx.fillRect(px-w/2, laneY-h-2, w, 1);          // top bar
+  ctx.fillRect(px-w/2, laneY-h-2, 1, h);          // left post
+  ctx.fillRect(px+w/2-1, laneY-h-2, 1, h);        // right post
+  // diagonal plank
+  ctx.fillStyle = P.hurdleShadow;
+  ctx.fillRect(px-2, laneY-h+2, 4, 1);
+  ctx.fillStyle = P.hurdle;
+  ctx.fillRect(px-2, laneY-h+4, 4, 1);
+  ctx.fillStyle = P.hurdleShadow;
+  ctx.fillRect(px-2, laneY-h+6, 4, 1);
+}
+
 // ---- track + scenery --------------------------------------------------------
-function renderTrack(){
-  // sky band
+function renderTrackBg(){
+  // sketched backdrop used behind non-race overlays (event card)
   ctx.fillStyle = P.sky; ctx.fillRect(0,0,VIEW_W,120);
-  // distant stadium silhouette (parallax slow)
+  drawStadium(0);
+  ctx.fillStyle = P.crowd; ctx.fillRect(0,80,VIEW_W,30);
+  drawCrowd(0);
+  ctx.fillStyle = P.trackInfield; ctx.fillRect(0,110,VIEW_W,8);
+  ctx.fillStyle = P.track; ctx.fillRect(0,TRACK_LANE_TOP,VIEW_W,TRACK_LANE_BOT-TRACK_LANE_TOP+4);
+  ctx.fillStyle = P.trackShadow; ctx.fillRect(0,TRACK_LANE_TOP,VIEW_W,2);
+}
+
+function renderTrack(){
+  const ev = run.ev;
+  ctx.fillStyle = P.sky; ctx.fillRect(0,0,VIEW_W,120);
   const parX = -run.scroll*0.15;
   drawStadium(parX);
-  // crowd band
   ctx.fillStyle = P.crowd; ctx.fillRect(0,80,VIEW_W,30);
   drawCrowd(-run.scroll*0.4);
-  // scoreboard block top-right
   drawScoreboard();
-  // infield grass
   ctx.fillStyle = P.trackInfield; ctx.fillRect(0,110,VIEW_W,8);
-  // running track lanes (4 lanes shown)
   drawRunningSurface();
-  // world-record marker line a few meters ahead
-  const trackPx = VIEW_W-40;
-  const mToPx = trackPx/TRACK_LEN_M;
-  const wrMetersAhead = WR_TIME * (TRACK_LEN_M/CPU_TARGET_TIME); // approx where WR pace would be
-  // Draw a yellow "WR" line at x where WR distance falls if player ran at WR pace… actually persistently mark distance == 100m
-  // Markers every 10m on track
+  // distance markers every 10m (or every 20m for hurdles distance 110)
+  const stepM = ev.distance === 100 ? 10 : 10;
   ctx.fillStyle = P.trackLine;
-  for (let m=10;m<=100;m+=10){
-    const px = 20 + m*mToPx - run.scroll;
+  for (let m=stepM;m<=ev.distance;m+=stepM){
+    const px = 20 + m*((VIEW_W-40)/ev.distance) - run.scroll;
     if (px < 0 || px > VIEW_W) continue;
-    ctx.fillRect(px, 130, 1, 30);
-    // distance label small
-    if (scene===Scene.RACE || scene===Scene.FINISH){
-      ctx.fillStyle = "#000a"; ctx.fillRect(px-10,160,20,8);
+    ctx.fillRect(px|0, TRACK_LANE_TOP+1, 1, TRACK_LANE_BOT-TRACK_LANE_TOP-1);
+    if (scene===Scene.RACE || scene===Scene.FINISH||scene===Scene.COUNTDOWN){
+      ctx.fillStyle = "#000a"; ctx.fillRect(px-10,170,20,8);
       ctx.fillStyle = P.yellow; ctx.font = "6px monospace"; ctx.textAlign="center";
-      ctx.fillText(m+"m", px, 167);
+      ctx.fillText(m+"m", px, 177);
       ctx.fillStyle = P.trackLine;
     }
   }
   // FINISH line
-  const fpx = 20 + TRACK_LEN_M*mToPx - run.scroll;
+  const fpx = 20 + ev.distance*((VIEW_W-40)/ev.distance) - run.scroll;
   if (fpx > 0 && fpx < VIEW_W+2){
-    // checkered finish
-    for (let y=130;y<160;y+=4){
+    for (let y=TRACK_LANE_TOP;y<TRACK_LANE_BOT;y+=4){
       ctx.fillStyle = (((y/4)|0)%2===0) ? "#000" : "#fff";
       ctx.fillRect(fpx-2, y, 4, 4);
     }
   }
-  // athletes: CPU lane above player lane
-  // CPU lane center y: 142; player lane y: 156 (track y range 130..160)
-  const trackPx2 = VIEW_W-40;
-  const mToPx2 = trackPx2/TRACK_LEN_M;
-  const cpuScreenX = 20 + run.cpu.x*mToPx2 - run.scroll;
-  const playerScreenX = 20 + run.player.x*mToPx2 - run.scroll;
-  // player stays around ~60px from left because scroll = playerX*mToPx - 60
-  drawAthlete(playerScreenX, 158, run.player.frameIdx, 1, P.p1);
-  // draw CPU (rival) marker
-  if (cpuScreenX < playerScreenX){
-    // ahead of player ⇒ keep visible
-    drawAthlete(Math.max(8, cpuScreenX), 144, run.cpu.frameIdx, 1, P.red);
-  } else if (cpuScreenX > VIEW_W-10){
-    // player has overtaken — keep CPU offscreen
-  } else {
-    drawAthlete(cpuScreenX, 144, run.cpu.frameIdx, 1, P.red);
+  // ---- Hurdles ----
+  if (ev.type === "hurdles" && run.clearFlags) {
+    for (let i=0;i<ev.obstacles.length;i++){
+      const hx = ev.obstacles[i];
+      const px = 20 + hx*((VIEW_W-40)/ev.distance) - run.scroll;
+      if (px < -8 || px > VIEW_W+8) continue;
+      if (run.clearFlags[i]) {
+        // knocked-over (cleared cleanly, hurdle stays standing in replay? we draw it cleared/fallen)
+        // Show the hurdle knocked down to indicate cleared
+        ctx.save();
+        ctx.globalAlpha = 0.6;
+        drawHurdleFallen(px, 156);
+        ctx.restore();
+      } else if (run.hitFlags[i]) {
+        // knocked over by collision
+        drawHurdleFallen(px, 156);
+      } else {
+        // CPU lane hurdle (top lane) - drawn lightly
+        drawHurdle(px-1, 144);
+        drawHurdle(px+1, 158);
+      }
+    }
   }
-  // player number indicator floating
+  // athletes
+  const mToPx = (VIEW_W-40) / ev.distance;
+  const playerScreenX = 20 + run.player.x*mToPx - run.scroll;
+  const cpuScreenX    = 20 + run.cpu.x*mToPx - run.scroll;
+  // CPU at upper lane
+  if (ev.type==="hurdles" && run.clearFlags) {
+    // CPU jumps cosmetically when near each uncleared-from-cpu side hurdle
+    run.cpu.airborne = false; // cpu never gets stuck on hurdles (auto-clear visual)
+    // give a small hop animation when cpu passes a hurdle x
+    let near=false;
+    for (const hx of ev.obstacles){ if (Math.abs(run.cpu.x - hx) < 1.4){ near=true; break; } }
+    if (near){ run.cpu.jumpHeight = 8 + 4*Math.sin(run.clock*16); run.cpu.airborne=true; }
+    else run.cpu.jumpHeight = 0;
+  }
+  drawAthlete(cpuScreenX, 144, run.cpu.frameIdx, 1, P.red, ev.type==="hurdles" && run.cpu.airborne, run.cpu.jumpHeight||0);
+  drawAthlete(playerScreenX, 158, run.player.frameIdx, 1, P.p1, run.player.airborne, run.player.jumpHeight);
+  // player number tag
   ctx.fillStyle = "#000a"; ctx.fillRect(playerScreenX-9,168,18,8);
   ctx.fillStyle = P.white; ctx.font="6px monospace"; ctx.textAlign="center";
   ctx.fillText("P1", playerScreenX, 174);
+
+  // hurdles HUD extras
+  if (ev.type === "hurdles"){
+    ctx.fillStyle = "#000a"; ctx.fillRect(4, 210, 120, 14);
+    ctx.fillStyle = P.white; ctx.font="7px monospace"; ctx.textAlign="left";
+    ctx.fillText("HURDLES "+run.player.hurdlesCleared+"/"+(ev.obstacles.length)+"  HIT "+run.player.hurdlesHit, 8, 220);
+  }
+}
+
+function drawHurdleFallen(px, laneY){
+  ctx.save();
+  ctx.translate(px, laneY);
+  ctx.fillStyle = P.hurdleShadow; ctx.fillRect(-4, -2, 8, 2);
+  ctx.fillStyle = P.hurdle; ctx.fillRect(-4, -3, 8, 1);
+  ctx.fillStyle = P.hurdleShadow; ctx.fillRect(-3, -4, 6, 1);
+  ctx.restore();
 }
 
 function drawStadium(offsetX){
   ctx.fillStyle = "#3a5a8a";
-  // simple tiered roof buildings across the back
   for (let i=0;i<10;i++){
     const x = ((i*52 + offsetX) % (VIEW_W+60)) - 30;
     ctx.fillRect(x, 60, 44, 18);
     ctx.fillRect(x+10, 56, 24, 6);
   }
-  // flags
   for (let i=0;i<8;i++){
     const x = ((i*32 + offsetX*1.3) % (VIEW_W+40)) - 20;
     ctx.fillStyle = (i%2)? P.red : P.yellow;
@@ -498,36 +686,33 @@ function drawCrowd(offsetX){
 }
 
 function drawScoreboard(){
-  // big scoreboard top-left in the stadium
+  const ev = run.ev;
   ctx.fillStyle = P.scoreboard; ctx.fillRect(8, 6, 120, 38);
   ctx.fillStyle = P.sbLight; ctx.fillRect(10,8,116,34);
   ctx.fillStyle = P.scoreboard; ctx.fillRect(12,10,112,30);
-  // title
   ctx.fillStyle = P.yellow; ctx.font="7px monospace"; ctx.textAlign="left";
-  ctx.fillText("100M DASH", 16, 19);
+  ctx.fillText(ev.name, 16, 19);
   ctx.fillStyle = P.white;
-  ctx.fillText("WR   : "+WR_TIME.toFixed(2), 16, 28);
-  ctx.fillText("QUAL : "+QUALIFY_TIME.toFixed(2), 16, 36);
+  ctx.fillText("WR   : "+ev.wrTime.toFixed(2), 16, 28);
+  ctx.fillText("QUAL : "+ev.qualifyTime.toFixed(2), 16, 36);
 }
 
-// the running surface: 4 lanes with white dividers
 function drawRunningSurface(){
-  // base track
-  ctx.fillStyle = P.track; ctx.fillRect(0, 128, VIEW_W, 36);
-  // shadows at lane tops
-  ctx.fillStyle = P.trackShadow; ctx.fillRect(0,128,VIEW_W,2);
+  ctx.fillStyle = P.track; ctx.fillRect(0, TRACK_LANE_TOP, VIEW_W, TRACK_LANE_BOT-TRACK_LANE_TOP+4);
+  ctx.fillStyle = P.trackShadow; ctx.fillRect(0,TRACK_LANE_TOP,VIEW_W,2);
   for (let i=0;i<5;i++){
-    const y = 128 + i*7;
+    const y = TRACK_LANE_TOP + i*7;
     ctx.fillStyle = (i%2)? "rgba(0,0,0,0.18)":"rgba(255,255,255,0.06)";
     ctx.fillRect(0,y,VIEW_W,1);
   }
-  // lane edge line top + bottom
-  ctx.fillStyle = P.trackLine; ctx.fillRect(0,128,VIEW_W,1); ctx.fillRect(0,163,VIEW_W,1);
+  ctx.fillStyle = P.trackLine;
+  ctx.fillRect(0,TRACK_LANE_TOP,VIEW_W,1);
+  ctx.fillRect(0,TRACK_LANE_BOT,VIEW_W,1);
 }
 
 // ---- HUD (in-race) ----------------------------------------------------------
 function renderHUD(){
-  // top-right clock + score panel
+  const ev = run.ev;
   ctx.fillStyle = "#0820a0"; ctx.fillRect(180, 6, 70, 38);
   ctx.fillStyle = P.sbLight; ctx.fillRect(182,8,66,34);
   ctx.fillStyle = P.scoreboard; ctx.fillRect(184,10,62,30);
@@ -537,60 +722,83 @@ function renderHUD(){
   ctx.fillText(run.clock.toFixed(2)+'"', 188, 30);
   ctx.fillStyle = P.yellow; ctx.font="6px monospace";
   ctx.fillText("LIVES "+lives+"  SCORE "+padScore(scoreDisplay), 188, 38);
-  // distance readout bottom-left
+  // distance readout
   ctx.fillStyle = "#000a"; ctx.fillRect(4, 222, 60, 14);
   ctx.fillStyle = P.white; ctx.font="7px monospace";
   ctx.fillText("DIST "+(run.player.x).toFixed(1).padStart(5,"0")+"m", 8, 232);
-  // speed bar bottom-right
+  // speed bar
   const sp = run.player.vx / MAX_SPEED;
   ctx.fillStyle = "#000a"; ctx.fillRect(196, 222, 58, 14);
   ctx.fillStyle = "#333"; ctx.fillRect(200, 226, 50, 6);
   ctx.fillStyle = sp>0.85? P.yellow : (sp>0.5? "#61d838" : "#888");
   ctx.fillRect(200,226, 50*Math.min(1,sp), 6);
+  // event indicator (top center)
+  ctx.fillStyle = "#000a"; ctx.fillRect(VIEW_W/2-44, 222, 88, 14);
+  ctx.fillStyle = P.yellow; ctx.font="7px monospace"; ctx.textAlign="center";
+  ctx.fillText("EVENT "+(eventIndex+1)+"/"+EVENTS.length+"  "+ev.name, VIEW_W/2, 232);
 }
 function padScore(n){ return ("000000"+(n|0)).slice(-6); }
 
 // ---- TITLE SCREEN ----------------------------------------------------------
 function renderTitle(){
-  // stadium backdrop
   ctx.fillStyle = P.sky; ctx.fillRect(0,0,VIEW_W,VIEW_H);
   drawStadium(0);
   drawCrowd(0);
   ctx.fillStyle = P.track; ctx.fillRect(0,110,VIEW_W,130);
-  // big title block
-  ctx.fillStyle = "#000"; ctx.fillRect(28, 56, 200, 80);
-  ctx.fillStyle = P.yellow; ctx.fillRect(28,56,200,6);
+  ctx.fillStyle = "#000"; ctx.fillRect(28, 40, 200, 96);
+  ctx.fillStyle = P.yellow; ctx.fillRect(28,40,200,6);
   ctx.fillStyle = P.red;    ctx.fillRect(28,130,200,6);
   ctx.fillStyle = P.white; ctx.font="16px monospace"; ctx.textAlign="center";
-  ctx.fillText("HYPER OLYMPIC", 128, 84);
+  ctx.fillText("HYPER OLYMPIC", 128, 68);
   ctx.fillStyle = P.yellow; ctx.font="10px monospace";
-  ctx.fillText("· TRACK & FIELD ·", 128, 100);
+  ctx.fillText("· TRACK & FIELD ·", 128, 84);
   ctx.fillStyle = P.white; ctx.font="7px monospace";
-  ctx.fillText("(c) 1987 ARCADE CLONE", 128, 118);
-  // blinking press start
+  ctx.fillText("(c) 1987 ARCADE CLONE", 128, 100);
+  ctx.fillStyle = P.yellow; ctx.font="6px monospace";
+  ctx.fillText("EVENT 1: 100M DASH", 128, 116);
+  ctx.fillText("EVENT 2: 110M HURDLES", 128, 124);
   if ((blinkT|0) % 2 === 0){
     ctx.fillStyle = P.yellow; ctx.font="8px monospace";
     ctx.fillText("PRESS  ENTER  TO  START", 128, 168);
   }
-  // footer high-score-ish
   ctx.fillStyle = P.white; ctx.font="6px monospace";
-  ctx.fillText("WR "+WR_TIME.toFixed(2)+'"   QUAL '+QUALIFY_TIME.toFixed(2)+'"', 128, 188);
-  ctx.fillText("ALTERNATE  L/R  OR  Z/X  TO  RUN", 128, 212);
-  // mascot athlete that auto-runs
+  ctx.fillText("ALTERNATE L/R OR Z/X TO RUN  ·  UP/SPACE TO JUMP", 128, 188);
+  ctx.fillText("WR 100m "+EVENTS[0].wrTime.toFixed(2)+'"   WR 110H '+EVENTS[1].wrTime.toFixed(2)+'"', 128, 212);
   const f = (blinkT*8 | 0) % 4;
   drawAthlete(40, 232, f, 1, P.p1);
   drawAthlete(216, 232, f, 1, P.red);
 }
 
-function renderCountdownOverlay(){
-  // READY banner
-  if (run.countdownT > 2.0){
-    bannerText("READY?", P.yellow);
-  } else if (run.countdownT > 1.0){
-    bannerText("SET!", P.white);
-  } else if (run.countdownT > 0){
-    bannerText("GO!", P.red);
+// ---- EVENT CARD (transition between events) -------------------------------
+function renderEventCard(){
+  const ev = curEvent();
+  // dim backdrop further
+  ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  ctx.fillStyle = "#0820a0"; ctx.fillRect(28, 70, 200, 100);
+  ctx.fillStyle = P.sbLight; ctx.fillRect(30,72,196,96);
+  ctx.fillStyle = P.scoreboard; ctx.fillRect(32,74,192,92);
+  // header
+  ctx.fillStyle = P.yellow; ctx.font="9px monospace"; ctx.textAlign="center";
+  ctx.fillText("EVENT  "+(eventIndex+1)+"  OF  "+EVENTS.length, 128, 92);
+  ctx.fillStyle = P.white; ctx.font="16px monospace";
+  ctx.fillText(ev.name, 128, 116);
+  ctx.fillStyle = P.yellow; ctx.font="7px monospace";
+  ctx.fillText("WORLD RECORD  "+ev.wrTime.toFixed(2)+'"', 128, 132);
+  ctx.fillText("QUALIFY TIME   "+ev.qualifyTime.toFixed(2)+'"', 128, 142);
+  if (ev.type==="hurdles"){
+    ctx.fillStyle = P.white; ctx.font="6px monospace";
+    ctx.fillText("PRESS UP / SPACE TO CLEAR HURDLES", 128, 154);
   }
+  if ((blinkT|0)%2===0 || cardT < 0.5){
+    ctx.fillStyle = P.yellow; ctx.font="7px monospace";
+    ctx.fillText("PRESS ENTER TO BEGIN", 128, 162);
+  }
+}
+
+function renderCountdownOverlay(){
+  if (run.countdownT > 2.0)      bannerText("READY?", P.yellow);
+  else if (run.countdownT > 1.0) bannerText("SET!", P.white);
+  else if (run.countdownT > 0)  bannerText("GO!", P.red);
 }
 function bannerText(s,col){
   ctx.fillStyle = "#000a"; ctx.fillRect(60,90,VIEW_W-120,40);
@@ -598,39 +806,44 @@ function bannerText(s,col){
   ctx.fillText(s, VIEW_W/2, 118);
 }
 function renderFinishOverlay(){
-  // central panel
+  const ev = run.ev;
   const t = run.player.finishTime;
-  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(20,40,216,140);
-  ctx.fillStyle = "#0820a0"; ctx.fillRect(28,48,200,124);
-  ctx.fillStyle = P.sbLight; ctx.fillRect(30,50,196,120);
-  ctx.fillStyle = P.scoreboard; ctx.fillRect(32,52,192,116);
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(20,40,216,150);
+  ctx.fillStyle = "#0820a0"; ctx.fillRect(28,48,200,134);
+  ctx.fillStyle = P.sbLight; ctx.fillRect(30,50,196,130);
+  ctx.fillStyle = P.scoreboard; ctx.fillRect(32,52,192,126);
   ctx.fillStyle = P.yellow; ctx.font="12px monospace"; ctx.textAlign="center";
-  ctx.fillText("100 METER DASH", 128, 70);
+  ctx.fillText(ev.name, 128, 70);
   ctx.fillStyle = P.white; ctx.font="14px monospace";
   ctx.fillText('TIME '+t.toFixed(2)+'"', 128, 90);
   ctx.fillStyle = P.yellow; ctx.font="9px monospace";
-  ctx.fillText("RECORD "+WR_TIME.toFixed(2)+'"', 128, 104);
+  ctx.fillText("RECORD "+ev.wrTime.toFixed(2)+'"', 128, 104);
+  if (ev.type==="hurdles"){
+    ctx.fillStyle = P.white; ctx.font="8px monospace";
+    ctx.fillText("HURDLES CLEARED "+run.player.hurdlesCleared+"/"+ev.obstacles.length, 128, 118);
+    ctx.fillText("HURDLES HIT "+run.player.hurdlesHit, 128, 128);
+  }
   if (run.newWR){
     const b = ((blinkT|0)%2===0);
-    if (b){ ctx.fillStyle = P.red; } else { ctx.fillStyle = P.yellow; }
-    ctx.font="12px monospace"; ctx.fillText("*** NEW WORLD RECORD ***",128,120);
+    ctx.fillStyle = b ? P.red : P.yellow;
+    ctx.font="12px monospace"; ctx.fillText("*** NEW WORLD RECORD ***",128,140);
   }
   if (run.Qualified){
     ctx.fillStyle = "#61d838"; ctx.font="10px monospace";
-    ctx.fillText("QUALIFIED!", 128, 136);
+    ctx.fillText("QUALIFIED!", 128, 152);
   } else {
     ctx.fillStyle = P.red; ctx.font="10px monospace";
-    ctx.fillText("DID NOT QUALIFY", 128, 136);
+    ctx.fillText("DID NOT QUALIFY", 128, 152);
   }
   ctx.fillStyle = P.white; ctx.font="8px monospace";
-  ctx.fillText("SCORE +"+run.awardedScore, 128, 150);
+  ctx.fillText("SCORE +"+run.awardedScore, 128, 164);
   ctx.fillStyle = P.yellow; ctx.font="6px monospace";
-  ctx.fillText("LIVES "+lives+"   TOTAL "+padScore(scoreDisplay), 128, 162);
-  // continue prompt
+  ctx.fillText("LIVES "+lives+"   TOTAL "+padScore(scoreDisplay), 128, 176);
   if ((blinkT|0)%2===0){
     ctx.fillStyle = P.white; ctx.font="7px monospace";
-    if (run.Qualified || lives>0) ctx.fillText("PRESS ENTER FOR NEXT EVENT", 128, 200);
-    else ctx.fillText("PRESS ENTER", 128, 200);
+    if (run.Qualified) ctx.fillText("PRESS ENTER FOR NEXT EVENT", 128, 196);
+    else if (lives>0)  ctx.fillText("PRESS ENTER TO RETRY", 128, 196);
+    else              ctx.fillText("PRESS ENTER", 128, 196);
   }
 }
 
@@ -640,6 +853,8 @@ function renderGameOver(){
   ctx.fillText("GAME  OVER", VIEW_W/2, 100);
   ctx.fillStyle = P.yellow; ctx.font="10px monospace";
   ctx.fillText("FINAL SCORE "+padScore(scoreDisplay), VIEW_W/2, 124);
+  ctx.fillStyle = P.white; ctx.font="7px monospace";
+  ctx.fillText("REACHED EVENT "+(eventIndex+1)+" — "+curEvent().name, VIEW_W/2, 142);
   if ((blinkT|0)%2===0){
     ctx.fillStyle = P.white; ctx.font="8px monospace";
     ctx.fillText("PRESS ENTER TO TRY AGAIN", VIEW_W/2, 168);
