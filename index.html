@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>HYPER OLYMPIC · 100m DASH</title>
+<style>
+  html,body{margin:0;background:#20232b;color:#eee;font-family:ui-monospace,Menlo,Consolas,monospace}
+  #wrap{display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:8px;gap:6px}
+  h1{font-size:14px;letter-spacing:3px;margin:0;text-shadow:0 0 6px #ffce5e}
+  canvas{
+    image-rendering:pixelated;image-rendering:crisp-edges;background:#000;
+    border:2px solid #4a4e69;box-shadow:0 0 0 3px #000,0 8px 24px rgba(0,0,0,.7);width:768px;height:720px;max-width:96vw;max-height:80vh
+  }
+  #hud{font-size:11px;line-height:1.5;color:#9ad;opacity:.85;text-align:center;max-width:768px}
+  #hud b{color:#ffce5e}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <h1>★ HYPER OLYMPIC ★  100M DASH ★</h1>
+  <canvas id="c" width="256" height="240"></canvas>
+  <div id="hud">
+    <b>← →</b> or <b>Z X</b> alternate rapidly to run &nbsp;·&nbsp; <b>Enter</b> start/continue &nbsp;·&nbsp; <b>M</b> mute
+  </div>
+</div>
+<script>
+"use strict";
+/* ============================================================================
+   HYPER OLYMPIC — Track & Field 100m Dash, faithful single-file HTML5 clone.
+   A spiritual/technical 1:1 of Konami's 1987 NES release "Track & Field".
+   Everything drawn procedurally. No external assets.
+   ============================================================================ */
+
+// ---- TUNABLE CONSTANTS (1:1 NES Track & Field 100m dash) --------------------
+const VIEW_W = 256, VIEW_H = 240;          // native NES-ish viewport
+const FPS = 60;
+const TRACK_LEN_M = 100;                    // race distance
+const QUALIFY_TIME = 11.50;                  // seconds to advance [NES]
+const WR_TIME = 9.95;                        // world-record display [NES era]
+const START_LIVES = 3;                       // 3 lives
+const EXTRA_LIFE_EVERY = 100000;             // +1 life per 100k (arcade rule)
+const START_SPEED = 0.0;                     // meters per frame at the gun
+const MAX_SPEED = 0.165;                      // m / frame  (~9.9 m/s, gives ~10.1s WR pace)
+const PRESS_GAIN = 0.027;                     // meters added per *alternating* press
+const FRICTION = 0.97;                        // per-frame decay when not pressing
+const FALSE_START_DELAY = 1.0;               // seconds, recycled after false start
+const SCORE_PER_QUALIFY = 5000;               // base for qualifying
+const SCORE_BONUS_PER_SEC = 1100;             // bonus pts per second under QUALIFY_TIME
+const WR_BONUS = 10000;                       // new world-record bonus
+
+// ---- DOM / CANVAS ----------------------------------------------------------
+const cv = document.getElementById("c");
+const ctx = cv.getContext("2d");
+ctx.imageSmoothingEnabled = false;
+const dbg = document.getElementById("hud");
+
+// ---- INPUT -----------------------------------------------------------------
+const keys = Object.create(null);
+const pressedThisFrame = Object.create(null);  // one-shot edge events
+let lastRunKey = null;                          // enforces alternation (no double-same)
+window.addEventListener("keydown", e => {
+  const k = e.key;
+  // prevent page scroll on arrows / space
+  if (["ArrowLeft","ArrowRight","ArrowUp","ArrowDown"," "].includes(k)) e.preventDefault();
+  if (!keys[k]) pressedThisFrame[k] = true;
+  keys[k] = true;
+  if (k === "m" || k === "M") { Audio.ensure(); Audio.toggleMute(); }
+},{passive:false});
+window.addEventListener("keyup", e => { keys[e.key] = false; });
+
+// A run "press" happens on a rising edge of Left or Right, AND must alternate.
+function consumeRunPress() {
+  const leftEdge  = pressedThisFrame["ArrowLeft"]  || pressedThisFrame["z"] || pressedThisFrame["Z"];
+  const rightEdge = pressedThisFrame["ArrowRight"] || pressedThisFrame["x"] || pressedThisFrame["X"];
+  // consume the edges we observe this frame
+  if (leftEdge){ pressedThisFrame["ArrowLeft"]=false; pressedThisFrame["z"]=false; pressedThisFrame["Z"]=false;}
+  if (rightEdge){ pressedThisFrame["ArrowRight"]=false; pressedThisFrame["x"]=false; pressedThisFrame["X"]=false;}
+  if (leftEdge && rightEdge) return null;             // both same frame = ignore
+  if (leftEdge)  { if (lastRunKey === "L") return null; lastRunKey="L"; return "L"; }
+  if (rightEdge) { if (lastRunKey === "R") return null; lastRunKey="R"; return "R"; }
+  return null;
+}
+
+// ---- AUDIO (procedural, Web Audio) -----------------------------------------
+const Audio = (() => {
+  let ctx=null, master=null, muted=false, musicGain=null;
+  function ensure(){
+    if (ctx) return;
+    ctx = new (window.AudioContext||window.webkitAudioContext)();
+    master = ctx.createGain(); master.gain.value=0.28; master.connect(ctx.destination);
+    musicGain = ctx.createGain(); musicGain.gain.value=0.14; musicGain.connect(master);
+  }
+  function blip(freq,dur,type="square",vol=0.5,dest){
+    if(muted||!ctx) return;
+    const o=ctx.createOscillator(), g=ctx.createGain();
+    o.type=type; o.frequency.value=freq;
+    g.gain.setValueAtTime(vol,ctx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime+dur);
+    o.connect(g); g.connect(dest||master);
+    o.start(); o.stop(ctx.currentTime+dur);
+  }
+  function noise(dur,vol=0.6,freq=1200,q=1){
+    if(muted||!ctx) return;
+    const buf = ctx.createBuffer(1, ctx.sampleRate*dur, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i=0;i<d.length;i++){ d[i]=(Math.random()*2-1)*(1-i/d.length); }
+    const src=ctx.createBufferSource(); src.buffer=buf;
+    const g=ctx.createGain(); g.gain.value=vol;
+    const f=ctx.createBiquadFilter(); f.type="bandpass"; f.frequency.value=freq; f.Q.value=q;
+    src.connect(g); g.connect(f); f.connect(master); src.start();
+  }
+  function gunshot(){ noise(0.18,0.30,180,0.7); blip(90,0.18,"square",0.22); }
+  function beep(f){ blip(f,0.08,"square",0.28); }
+  function cheer(){
+    // softer, longer crowd ambience
+    noise(1.2,0.08,900,0.5);
+    noise(0.9,0.06,1600,0.4);
+  }
+  function fanfare(){}
+  // --- Simple "Olympic-style" original 4-note triumphant motif (not Chariots) ---
+  let musicTimer=null, musicOn=false;
+  const motif = [ [0,392,0.22],[0.22,440,0.22],[0.44,587,0.34],[0.78,523,0.55] ];
+  function stopMusic(){ musicOn=false; if(musicTimer){clearInterval(musicTimer);musicTimer=null;} }
+  function startMusic(){
+    if(!ctx||muted) return;
+    musicOn=true;
+    let i=0;
+    const loop = () => {
+      if(!musicOn) return;
+      // notes play with a 1.6s loop
+      const t = (i/8) % 1.6;
+      motif.forEach(([at,f,d])=>{ if(Math.abs(t-at)<0.02) blip(f,d*0.9,"triangle",0.10,musicGain); });
+      i += 0.2;
+    };
+    if(musicTimer) clearInterval(musicTimer);
+    musicTimer = setInterval(loop, 200);
+  }
+  return {
+    ensure, gunshot, beep, cheer,
+    startMusic, stopMusic,
+    toggleMute(){ muted=!muted; if(master) master.gain.value = muted?0:0.5; return muted; },
+    resume(){ if(ctx && ctx.state==="suspended") ctx.resume(); }
+  };
+})();
+
+// ---- GAME STATE -------------------------------------------------------------
+const Scene = { TITLE:"TITLE", COUNTDOWN:"COUNTDOWN", RACE:"RACE", FINISH:"FINISH", GAMEOVER:"GAMEOVER" };
+let scene = Scene.TITLE;
+let lives = START_LIVES;
+let score = 0;
+let scoreDisplay = 0;             // for animated counter
+let blinkT = 0;
+let frameAccum = 0;               // fixed-timestep accumulator (ms)
+
+// Race/runtime state (reset by startRace)
+let run = null;
+
+function newRunner(){
+  return {
+    x: 0,                  // meters from start line
+    vx: START_SPEED,       // meters per frame
+    frameIdx: 0,
+    frameTimer: 0,
+    lastPress: null,        // "L"|"R"
+    presses: 0,             // total alternating presses (debug)
+    finished: false,
+    finishTime: 0,          // seconds
+  };
+}
+
+function startRace(){
+  run = { player:newRunner(), cpu:newRunner(),
+          clock:0,                    // seconds elapsed since gun
+          phase:"countdown",          // countdown -> running -> done
+          countdownT: 3.0,            // READY.. countdown
+          falseStart:false,
+          finished:false,
+          newWR:false,
+         Qualified:false,
+          awardedScore:0,
+          scroll:0,                   // background scroll in pixels
+  };
+}
+
+// CPU runs at a steady pace to give the player a visual rival.
+const CPU_TARGET_TIME = 11.20;    // computer rival pace (≈ qualifying-ish speed)
+const CPU_SPEED = TRACK_LEN_M / (CPU_TARGET_TIME * FPS);
+
+// ---- MAIN LOOP --------------------------------------------------------------
+let last = performance.now();
+function loop(now){
+  let dt = now - last; last = now;
+  if (dt > 250) dt = 250;
+  frameAccum += dt;
+  // Fixed-timestep 60Hz updates
+  let steps = 0;
+  while (frameAccum >= 1000/FPS && steps < 5){
+    update(1/60);
+    frameAccum -= 1000/FPS; steps++;
+    // Clear one-shot edges ONLY when an update step actually ran,
+    // so a press captured between rAF ticks isn't lost if no step executes.
+    for (const k in pressedThisFrame) pressedThisFrame[k]=false;
+  }
+  render();
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---- UPDATE -----------------------------------------------------------------
+function update(dt){
+  blinkT += dt;
+  Audio.resume();
+  // animated score display
+  if (scoreDisplay < score) scoreDisplay = Math.min(score, scoreDisplay + Math.max(1, Math.ceil((score-scoreDisplay)/12)));
+
+  switch(scene){
+    case Scene.TITLE:
+      if (enterPressed()) { Audio.ensure(); Audio.startMusic(); scene = Scene.COUNTDOWN; prepareRace(); }
+      break;
+    case Scene.COUNTDOWN:
+      updateCountdown(dt); break;
+    case Scene.RACE:
+      updateRace(dt); break;
+    case Scene.FINISH:
+      if (enterPressed()) {
+        if (run.Qualified) { prepareRace(); scene = Scene.COUNTDOWN; }
+        else if (lives > 0) { prepareRace(); scene = Scene.COUNTDOWN; }
+        else scene = Scene.GAMEOVER;
+      }
+      break;
+    case Scene.GAMEOVER:
+      if (enterPressed()) resetGame();
+      break;
+  }
+}
+
+function enterPressed(){
+  const e = pressedThisFrame["Enter"] || pressedThisFrame[" "] || pressedThisFrame["ArrowUp"];
+  if (e){ pressedThisFrame["Enter"]=false; pressedThisFrame[" "]=false; pressedThisFrame["ArrowUp"]=false; return true; }
+  return false;
+}
+
+function prepareRace(){
+  startRace();
+}
+
+function updateCountdown(dt){
+  // consume any run presses during countdown so they don't sneak into the race early
+  consumeRunPress();
+  run.countdownT -= dt;
+  if (run.countdownT <= 0){
+    run.phase = "running";
+    scene = Scene.RACE;          // << the actual bug: race never started as a scene
+    Audio.gunshot();
+  } else if (run.countdownT <= 2.0 && !run._beeped2){ run._beeped2=true; Audio.beep(660); }
+  else if (run.countdownT <= 1.0 && !run._beeped1){ run._beeped1=true; Audio.beep(740); }
+}
+
+function updateRace(dt){
+  if (run.phase !== "running") return;
+
+  // FALSE START: a press during countdown rises above ~0 speed early already handled.
+  // Read player input (alternating buttons)
+  const p = consumeRunPress();
+  if (p){
+    run.player.lastPress = p;
+    run.player.presses++;
+    // apply speed gain, capped at MAX_SPEED
+    run.player.vx = Math.min(MAX_SPEED, run.player.vx + PRESS_GAIN);
+    // sprite frame advances every press
+    run.player.frameIdx = (run.player.frameIdx + 1) % 4;
+  } else {
+    // only decay when no press registered this frame (a press = muscle firing)
+    run.player.vx *= FRICTION;
+    if (run.player.vx < 0) run.player.vx = 0;
+  }
+  run.player.x += run.player.vx;
+
+  // CPU rival: constant pace, slight wobble for life
+  run.cpu.vx = CPU_SPEED * (1 + 0.04*Math.sin(run.clock*4));
+  run.cpu.x += run.cpu.vx;
+
+  // clock
+  run.clock += dt;
+
+  // CPU sprite animation by distance travelled
+  run.cpu.frameTimer += dt;
+  if (run.cpu.frameTimer > 0.08){ run.cpu.frameTimer = 0; run.cpu.frameIdx = (run.cpu.frameIdx + 1) % 4; }
+
+  // scroll world so player stays ~left third
+  const trackPx = VIEW_W - 40;       // 100m maps to this pixel span roughly
+  const mToPx = trackPx / TRACK_LEN_M;
+  run.scroll = Math.max(0, run.player.x * mToPx - 60);
+
+  // finish check
+  if (!run.player.finished && run.player.x >= TRACK_LEN_M){
+    run.player.finished = true;
+    run.player.finishTime = run.clock;
+  }
+  if (!run.cpu.finished && run.cpu.x >= TRACK_LEN_M){
+    run.cpu.finished = true;
+    run.cpu.finishTime = run.clock;
+  }
+
+  if (run.player.finished){
+    finishRace();
+  } else if (run.clock > 20.0){
+    // safety: didn't cross line — force a DNF-style finish
+    run.player.finishTime = run.clock;
+    finishRace();
+  }
+}
+
+function finishRace(){
+  run.phase = "done";
+  Audio.cheer();
+  const t = run.player.finishTime;
+  run.Qualified = (t <= QUALIFY_TIME);
+  run.newWR = (t < WR_TIME);
+
+  let pts = 0;
+  if (run.Qualified){
+    pts = SCORE_PER_QUALIFY + Math.floor((QUALIFY_TIME - t) * SCORE_BONUS_PER_SEC);
+    if (run.newWR) pts += WR_BONUS;
+  } else {
+    pts = Math.max(0, Math.floor((20.0 - t) * 100));
+  }
+  run.awardedScore = pts;
+  score += pts;
+  // lives
+  if (!run.Qualified) lives = Math.max(0, lives - 1);
+  // extra life every 100k (arcade rule)
+  while (score > 0 && score - pts < (Math.floor(score/EXTRA_LIFE_EVERY))*EXTRA_LIFE_EVERY
+                    && score >= (Math.floor(score/EXTRA_LIFE_EVERY))*EXTRA_LIFE_EVERY
+                    && (Math.floor((score-pts)/EXTRA_LIFE_EVERY) < Math.floor(score/EXTRA_LIFE_EVERY))) {
+    lives++;
+    Audio.beep(880);
+  }
+  scene = Scene.FINISH;
+}
+
+function resetGame(){
+  lives = START_LIVES;
+  score = 0; scoreDisplay = 0;
+  scene = Scene.TITLE;
+  Audio.stopMusic();
+}
+
+// =============================================================================
+// ---- RENDER -----------------------------------------------------------------
+// =============================================================================
+function render(){
+  ctx.save();
+  ctx.fillStyle = "#000"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  switch(scene){
+    case Scene.TITLE: renderTitle(); break;
+    case Scene.COUNTDOWN: renderTrack(); renderCountdownOverlay(); break;
+    case Scene.RACE: renderTrack(); renderHUD(); break;
+    case Scene.FINISH: renderTrack(); renderFinishOverlay(); break;
+    case Scene.GAMEOVER: renderTrack(); renderGameOver(); break;
+  }
+  ctx.restore();
+}
+
+// ---- NES-ish palette --------------------------------------------------------
+const P = {
+  sky:"#5c94fc", skyNight:"#101820", crowd:"#c84818", crowdShadow:"#7c1808",
+  track:"#b86c1c", trackLine:"#fff", trackInfield:"#3aa03a", trackShadow:"#8c4a14",
+  red:"#e83820", yellow:"#ffce5e", white:"#fff", black:"#000", tan:"#f4c080",
+  scoreboard:"#0820a0", sbLight:"#3868d8",
+  baton:"#ffd070",
+  p1:"#fcfcfc", p2:"#f0c060",
+  text:"#fff",
+};
+
+// Sprite: stick athlete that uses frame index 0..3 to alternate leg/arm.
+// drawAthlete(cx, groundY, frame, dir, skinShirt)
+function drawAthlete(cx, gy, frame, dir, shirt){
+  // dir: +1 facing right
+  ctx.save();
+  ctx.translate(cx, gy);
+  // legs alternate per frame (sine anim). Arm swings opposite.
+  const legSwing = Math.sin(frame * Math.PI/2) * 4;
+  // head (skin)
+  ctx.fillStyle = P.tan;
+  ctx.beginPath(); ctx.arc(0, -26, 4, 0, 7); ctx.fill();
+  // body (shirt)
+  ctx.fillStyle = shirt;
+  ctx.fillRect(-3, -22, 6, 10);
+  // legs
+  ctx.strokeStyle = "#5c4c3c"; ctx.lineWidth = 2; ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(-1, -12); ctx.lineTo(-2 - legSwing, -2);
+  ctx.moveTo( 1, -12); ctx.lineTo( 2 + legSwing, -2);
+  ctx.stroke();
+  // arms (swing opposite to legs)
+  ctx.beginPath();
+  ctx.moveTo(0, -20); ctx.lineTo( 4 + legSwing, -14);
+  ctx.moveTo(0, -20); ctx.lineTo(-4 - legSwing, -14);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---- track + scenery --------------------------------------------------------
+function renderTrack(){
+  // sky band
+  ctx.fillStyle = P.sky; ctx.fillRect(0,0,VIEW_W,120);
+  // distant stadium silhouette (parallax slow)
+  const parX = -run.scroll*0.15;
+  drawStadium(parX);
+  // crowd band
+  ctx.fillStyle = P.crowd; ctx.fillRect(0,80,VIEW_W,30);
+  drawCrowd(-run.scroll*0.4);
+  // scoreboard block top-right
+  drawScoreboard();
+  // infield grass
+  ctx.fillStyle = P.trackInfield; ctx.fillRect(0,110,VIEW_W,8);
+  // running track lanes (4 lanes shown)
+  drawRunningSurface();
+  // world-record marker line a few meters ahead
+  const trackPx = VIEW_W-40;
+  const mToPx = trackPx/TRACK_LEN_M;
+  const wrMetersAhead = WR_TIME * (TRACK_LEN_M/CPU_TARGET_TIME); // approx where WR pace would be
+  // Draw a yellow "WR" line at x where WR distance falls if player ran at WR pace… actually persistently mark distance == 100m
+  // Markers every 10m on track
+  ctx.fillStyle = P.trackLine;
+  for (let m=10;m<=100;m+=10){
+    const px = 20 + m*mToPx - run.scroll;
+    if (px < 0 || px > VIEW_W) continue;
+    ctx.fillRect(px, 130, 1, 30);
+    // distance label small
+    if (scene===Scene.RACE || scene===Scene.FINISH){
+      ctx.fillStyle = "#000a"; ctx.fillRect(px-10,160,20,8);
+      ctx.fillStyle = P.yellow; ctx.font = "6px monospace"; ctx.textAlign="center";
+      ctx.fillText(m+"m", px, 167);
+      ctx.fillStyle = P.trackLine;
+    }
+  }
+  // FINISH line
+  const fpx = 20 + TRACK_LEN_M*mToPx - run.scroll;
+  if (fpx > 0 && fpx < VIEW_W+2){
+    // checkered finish
+    for (let y=130;y<160;y+=4){
+      ctx.fillStyle = (((y/4)|0)%2===0) ? "#000" : "#fff";
+      ctx.fillRect(fpx-2, y, 4, 4);
+    }
+  }
+  // athletes: CPU lane above player lane
+  // CPU lane center y: 142; player lane y: 156 (track y range 130..160)
+  const trackPx2 = VIEW_W-40;
+  const mToPx2 = trackPx2/TRACK_LEN_M;
+  const cpuScreenX = 20 + run.cpu.x*mToPx2 - run.scroll;
+  const playerScreenX = 20 + run.player.x*mToPx2 - run.scroll;
+  // player stays around ~60px from left because scroll = playerX*mToPx - 60
+  drawAthlete(playerScreenX, 158, run.player.frameIdx, 1, P.p1);
+  // draw CPU (rival) marker
+  if (cpuScreenX < playerScreenX){
+    // ahead of player ⇒ keep visible
+    drawAthlete(Math.max(8, cpuScreenX), 144, run.cpu.frameIdx, 1, P.red);
+  } else if (cpuScreenX > VIEW_W-10){
+    // player has overtaken — keep CPU offscreen
+  } else {
+    drawAthlete(cpuScreenX, 144, run.cpu.frameIdx, 1, P.red);
+  }
+  // player number indicator floating
+  ctx.fillStyle = "#000a"; ctx.fillRect(playerScreenX-9,168,18,8);
+  ctx.fillStyle = P.white; ctx.font="6px monospace"; ctx.textAlign="center";
+  ctx.fillText("P1", playerScreenX, 174);
+}
+
+function drawStadium(offsetX){
+  ctx.fillStyle = "#3a5a8a";
+  // simple tiered roof buildings across the back
+  for (let i=0;i<10;i++){
+    const x = ((i*52 + offsetX) % (VIEW_W+60)) - 30;
+    ctx.fillRect(x, 60, 44, 18);
+    ctx.fillRect(x+10, 56, 24, 6);
+  }
+  // flags
+  for (let i=0;i<8;i++){
+    const x = ((i*32 + offsetX*1.3) % (VIEW_W+40)) - 20;
+    ctx.fillStyle = (i%2)? P.red : P.yellow;
+    ctx.fillRect(x, 50, 6, 4);
+    ctx.fillStyle = "#444"; ctx.fillRect(x+2, 54, 1, 8);
+  }
+}
+
+function drawCrowd(offsetX){
+  const colors = [P.crowd, "#ffce5e", "#fcfcfc", "#3868d8"];
+  for (let y=80; y<110; y+=4){
+    for (let x=0; x<VIEW_W; x+=4){
+      const i = ((x/4 + y/4 + (offsetX|0)/4) | 0);
+      if (i % 3 === 0){ ctx.fillStyle = colors[(i>>1)%colors.length]; ctx.fillRect(x,y,3,3); }
+      else { ctx.fillStyle = P.crowdShadow; ctx.fillRect(x,y,3,3); }
+    }
+  }
+}
+
+function drawScoreboard(){
+  // big scoreboard top-left in the stadium
+  ctx.fillStyle = P.scoreboard; ctx.fillRect(8, 6, 120, 38);
+  ctx.fillStyle = P.sbLight; ctx.fillRect(10,8,116,34);
+  ctx.fillStyle = P.scoreboard; ctx.fillRect(12,10,112,30);
+  // title
+  ctx.fillStyle = P.yellow; ctx.font="7px monospace"; ctx.textAlign="left";
+  ctx.fillText("100M DASH", 16, 19);
+  ctx.fillStyle = P.white;
+  ctx.fillText("WR   : "+WR_TIME.toFixed(2), 16, 28);
+  ctx.fillText("QUAL : "+QUALIFY_TIME.toFixed(2), 16, 36);
+}
+
+// the running surface: 4 lanes with white dividers
+function drawRunningSurface(){
+  // base track
+  ctx.fillStyle = P.track; ctx.fillRect(0, 128, VIEW_W, 36);
+  // shadows at lane tops
+  ctx.fillStyle = P.trackShadow; ctx.fillRect(0,128,VIEW_W,2);
+  for (let i=0;i<5;i++){
+    const y = 128 + i*7;
+    ctx.fillStyle = (i%2)? "rgba(0,0,0,0.18)":"rgba(255,255,255,0.06)";
+    ctx.fillRect(0,y,VIEW_W,1);
+  }
+  // lane edge line top + bottom
+  ctx.fillStyle = P.trackLine; ctx.fillRect(0,128,VIEW_W,1); ctx.fillRect(0,163,VIEW_W,1);
+}
+
+// ---- HUD (in-race) ----------------------------------------------------------
+function renderHUD(){
+  // top-right clock + score panel
+  ctx.fillStyle = "#0820a0"; ctx.fillRect(180, 6, 70, 38);
+  ctx.fillStyle = P.sbLight; ctx.fillRect(182,8,66,34);
+  ctx.fillStyle = P.scoreboard; ctx.fillRect(184,10,62,30);
+  ctx.fillStyle = P.yellow; ctx.font="7px monospace"; ctx.textAlign="left";
+  ctx.fillText("TIME",188,19);
+  ctx.fillStyle = P.white; ctx.font="10px monospace";
+  ctx.fillText(run.clock.toFixed(2)+'"', 188, 30);
+  ctx.fillStyle = P.yellow; ctx.font="6px monospace";
+  ctx.fillText("LIVES "+lives+"  SCORE "+padScore(scoreDisplay), 188, 38);
+  // distance readout bottom-left
+  ctx.fillStyle = "#000a"; ctx.fillRect(4, 222, 60, 14);
+  ctx.fillStyle = P.white; ctx.font="7px monospace";
+  ctx.fillText("DIST "+(run.player.x).toFixed(1).padStart(5,"0")+"m", 8, 232);
+  // speed bar bottom-right
+  const sp = run.player.vx / MAX_SPEED;
+  ctx.fillStyle = "#000a"; ctx.fillRect(196, 222, 58, 14);
+  ctx.fillStyle = "#333"; ctx.fillRect(200, 226, 50, 6);
+  ctx.fillStyle = sp>0.85? P.yellow : (sp>0.5? "#61d838" : "#888");
+  ctx.fillRect(200,226, 50*Math.min(1,sp), 6);
+}
+function padScore(n){ return ("000000"+(n|0)).slice(-6); }
+
+// ---- TITLE SCREEN ----------------------------------------------------------
+function renderTitle(){
+  // stadium backdrop
+  ctx.fillStyle = P.sky; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  drawStadium(0);
+  drawCrowd(0);
+  ctx.fillStyle = P.track; ctx.fillRect(0,110,VIEW_W,130);
+  // big title block
+  ctx.fillStyle = "#000"; ctx.fillRect(28, 56, 200, 80);
+  ctx.fillStyle = P.yellow; ctx.fillRect(28,56,200,6);
+  ctx.fillStyle = P.red;    ctx.fillRect(28,130,200,6);
+  ctx.fillStyle = P.white; ctx.font="16px monospace"; ctx.textAlign="center";
+  ctx.fillText("HYPER OLYMPIC", 128, 84);
+  ctx.fillStyle = P.yellow; ctx.font="10px monospace";
+  ctx.fillText("· TRACK & FIELD ·", 128, 100);
+  ctx.fillStyle = P.white; ctx.font="7px monospace";
+  ctx.fillText("(c) 1987 ARCADE CLONE", 128, 118);
+  // blinking press start
+  if ((blinkT|0) % 2 === 0){
+    ctx.fillStyle = P.yellow; ctx.font="8px monospace";
+    ctx.fillText("PRESS  ENTER  TO  START", 128, 168);
+  }
+  // footer high-score-ish
+  ctx.fillStyle = P.white; ctx.font="6px monospace";
+  ctx.fillText("WR "+WR_TIME.toFixed(2)+'"   QUAL '+QUALIFY_TIME.toFixed(2)+'"', 128, 188);
+  ctx.fillText("ALTERNATE  L/R  OR  Z/X  TO  RUN", 128, 212);
+  // mascot athlete that auto-runs
+  const f = (blinkT*8 | 0) % 4;
+  drawAthlete(40, 232, f, 1, P.p1);
+  drawAthlete(216, 232, f, 1, P.red);
+}
+
+function renderCountdownOverlay(){
+  // READY banner
+  if (run.countdownT > 2.0){
+    bannerText("READY?", P.yellow);
+  } else if (run.countdownT > 1.0){
+    bannerText("SET!", P.white);
+  } else if (run.countdownT > 0){
+    bannerText("GO!", P.red);
+  }
+}
+function bannerText(s,col){
+  ctx.fillStyle = "#000a"; ctx.fillRect(60,90,VIEW_W-120,40);
+  ctx.fillStyle = col; ctx.font="20px monospace"; ctx.textAlign="center";
+  ctx.fillText(s, VIEW_W/2, 118);
+}
+function renderFinishOverlay(){
+  // central panel
+  const t = run.player.finishTime;
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(20,40,216,140);
+  ctx.fillStyle = "#0820a0"; ctx.fillRect(28,48,200,124);
+  ctx.fillStyle = P.sbLight; ctx.fillRect(30,50,196,120);
+  ctx.fillStyle = P.scoreboard; ctx.fillRect(32,52,192,116);
+  ctx.fillStyle = P.yellow; ctx.font="12px monospace"; ctx.textAlign="center";
+  ctx.fillText("100 METER DASH", 128, 70);
+  ctx.fillStyle = P.white; ctx.font="14px monospace";
+  ctx.fillText('TIME '+t.toFixed(2)+'"', 128, 90);
+  ctx.fillStyle = P.yellow; ctx.font="9px monospace";
+  ctx.fillText("RECORD "+WR_TIME.toFixed(2)+'"', 128, 104);
+  if (run.newWR){
+    const b = ((blinkT|0)%2===0);
+    if (b){ ctx.fillStyle = P.red; } else { ctx.fillStyle = P.yellow; }
+    ctx.font="12px monospace"; ctx.fillText("*** NEW WORLD RECORD ***",128,120);
+  }
+  if (run.Qualified){
+    ctx.fillStyle = "#61d838"; ctx.font="10px monospace";
+    ctx.fillText("QUALIFIED!", 128, 136);
+  } else {
+    ctx.fillStyle = P.red; ctx.font="10px monospace";
+    ctx.fillText("DID NOT QUALIFY", 128, 136);
+  }
+  ctx.fillStyle = P.white; ctx.font="8px monospace";
+  ctx.fillText("SCORE +"+run.awardedScore, 128, 150);
+  ctx.fillStyle = P.yellow; ctx.font="6px monospace";
+  ctx.fillText("LIVES "+lives+"   TOTAL "+padScore(scoreDisplay), 128, 162);
+  // continue prompt
+  if ((blinkT|0)%2===0){
+    ctx.fillStyle = P.white; ctx.font="7px monospace";
+    if (run.Qualified || lives>0) ctx.fillText("PRESS ENTER FOR NEXT EVENT", 128, 200);
+    else ctx.fillText("PRESS ENTER", 128, 200);
+  }
+}
+
+function renderGameOver(){
+  ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  ctx.fillStyle = P.red; ctx.font="24px monospace"; ctx.textAlign="center";
+  ctx.fillText("GAME  OVER", VIEW_W/2, 100);
+  ctx.fillStyle = P.yellow; ctx.font="10px monospace";
+  ctx.fillText("FINAL SCORE "+padScore(scoreDisplay), VIEW_W/2, 124);
+  if ((blinkT|0)%2===0){
+    ctx.fillStyle = P.white; ctx.font="8px monospace";
+    ctx.fillText("PRESS ENTER TO TRY AGAIN", VIEW_W/2, 168);
+  }
+}
+
+</script>
+</body>
+</html>
