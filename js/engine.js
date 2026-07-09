@@ -123,7 +123,7 @@ const Audio = (() => {
   return {
     ensure, gunshot, beep, cheer, thud, jumpSfx, landSfx,
     startMusic, stopMusic,
-    toggleMute(){ muted=!muted; if(master) master.gain.value = muted?0:0.5; return muted; },
+    toggleMute(){ muted=!muted; if(master) master.gain.value = muted?0:0.28; return muted; },
     resume(){ if(ctx && ctx.state==="suspended") ctx.resume(); }
   };
 })();

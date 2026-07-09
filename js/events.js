@@ -266,6 +266,7 @@ function updateLongJump(dt){
       } else {
         lj.attempt++;
         p.x = 0; p.vx = 0; p.airborne = false; p.jumpHeight = 0;
+        lj.foul = false;
         run.phase = "runup";
       }
     }
@@ -391,6 +392,7 @@ function updateJavelin(dt){
       } else {
         jav.attempt++;
         p.x = 0; p.vx = 0; p.airborne = false; p.jumpHeight = 0;
+        jav.foul = false;
         run.phase = "runup";
         jav.throwPhase = "idle";
       }
