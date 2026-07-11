@@ -50,6 +50,17 @@ registerEvent({
   qualifyTime: 0, wrTime: 0, cpuTargetTime: 0, obstacles: null,
 });
 
+registerEvent({
+  id:"SHOTPUT", name:"SHOT PUT",
+  type:"shotput",
+  distance: 10,
+  boardAt: 5,
+  qualifyDist: 15.50,
+  wrDist: 23.37,
+  attempts: 3,
+  qualifyTime: 0, wrTime: 0, cpuTargetTime: 0, obstacles: null,
+});
+
 // ---- COUNTDOWN --------------------------------------------------------------
 function updateCountdown(dt){
   consumeRunPress(); consumeJumpPress();
@@ -66,6 +77,7 @@ function updateCountdown(dt){
 function updateRace(dt){
   if (run.ev.type === "longjump") { updateLongJump(dt); return; }
   if (run.ev.type === "javelin") { updateJavelin(dt); return; }
+  if (run.ev.type === "shotput") { updateShotPut(dt); return; }
   if (run.phase !== "running") return;
   const ev = run.ev;
 
@@ -286,6 +298,133 @@ function foulAttempt(){
 function finishLongJump(){
   const ev = run.ev;
   const best = run.lj.bestDist;
+  run.Qualified = (best >= ev.qualifyDist);
+  run.newWR = (best > ev.wrDist);
+  let pts = 0;
+  if (run.Qualified) {
+    pts = SCORE_PER_QUALIFY + Math.floor((best - ev.qualifyDist) * 1000);
+    if (run.newWR) pts += WR_BONUS;
+  } else {
+    pts = Math.floor(best * 100);
+  }
+  run.awardedScore = pts;
+  addScore(pts);
+  if (!run.Qualified) lives = Math.max(0, lives - 1);
+  run.phase = "done";
+  Audio.cheer();
+  scene = Scene.FINISH;
+}
+
+// ---- SHOT PUT UPDATE --------------------------------------------------------
+function updateShotPut(dt){
+  const ev = run.ev;
+  const sp = run.sp;
+  const p = run.player;
+
+  if (run.phase === "runup") {
+    const press = consumeRunPress();
+    if (press) {
+      p.lastPress = press;
+      p.presses++;
+      p.vx = Math.min(MAX_SPEED, p.vx + PRESS_GAIN);
+      p.frameIdx = (p.frameIdx + 1) % 4;
+    } else {
+      p.vx *= FRICTION;
+      if (p.vx < 0) p.vx = 0;
+    }
+    p.x += p.vx;
+    run.clock += dt;
+    const mToPx = (VIEW_W-40) / ev.distance;
+    run.scroll = Math.max(0, p.x*mToPx - 60);
+
+    if (consumeJumpPress() && p.x >= ev.boardAt - 1.5) {
+      if (p.x <= ev.boardAt + 0.5 && p.vx > 0.02) {
+        sp.throwX = p.x;
+        sp.throwSpeed = p.vx;
+        sp.throwAngle = 45;
+        sp.angleDir = 1;
+        sp.throwPhase = "aiming";
+        p.airborne = false;
+        p.vx = 0;
+        Audio.jumpSfx();
+      } else {
+        foulShotPut();
+      }
+    } else if (p.x > ev.boardAt + 0.5) {
+      foulShotPut();
+    }
+    return;
+  }
+
+  if (sp.throwPhase === "aiming") {
+    sp.throwAngle += sp.angleDir * 120 * dt;
+    if (sp.throwAngle >= 80) { sp.throwAngle = 80; sp.angleDir = -1; }
+    if (sp.throwAngle <= 10) { sp.throwAngle = 10; sp.angleDir = 1; }
+    if (consumeJumpPress()) {
+      sp.throwPhase = "flight";
+      sp.flightT = 0.8 + sp.throwSpeed * 5.0;
+      sp.flightElapsed = 0;
+      const rad = sp.throwAngle * Math.PI / 180;
+      const power = 2.5 + sp.throwSpeed * 12;
+      sp.spVx = Math.cos(rad) * power;
+      sp.spVy = Math.sin(rad) * power;
+      sp.spX = ev.boardAt;
+      sp.spY = 0;
+      Audio.beep(800);
+    }
+    run.clock += dt;
+    return;
+  }
+
+  if (sp.throwPhase === "flight") {
+    sp.flightElapsed += dt;
+    sp.spX += sp.spVx;
+    sp.spVy -= 0.12;
+    sp.spY += sp.spVy;
+    if (sp.spY <= 0 && sp.flightElapsed > 0.2) {
+      sp.spY = 0;
+      sp.landDist = Math.max(0, sp.spX - ev.boardAt);
+      sp.throwPhase = "landed";
+      sp.resultTimer = 2.2;
+      Audio.landSfx();
+    }
+    const mToPx = (VIEW_W-40) / ev.distance;
+    run.scroll = Math.max(0, (ev.boardAt + (sp.spX - ev.boardAt) * 0.5) * mToPx - 60);
+    run.clock += dt;
+    return;
+  }
+
+  if (sp.throwPhase === "landed") {
+    sp.resultTimer -= dt;
+    if (sp.resultTimer <= 0 || enterPressed()) {
+      sp.distances.push(sp.foul ? 0 : sp.landDist);
+      if (!sp.foul && sp.landDist > sp.bestDist) sp.bestDist = sp.landDist;
+      if (sp.attempt >= ev.attempts) {
+        finishShotPut();
+      } else {
+        sp.attempt++;
+        p.x = 0; p.vx = 0; p.airborne = false; p.jumpHeight = 0;
+        sp.foul = false;
+        run.phase = "runup";
+        sp.throwPhase = "idle";
+      }
+    }
+    return;
+  }
+}
+
+function foulShotPut(){
+  const sp = run.sp;
+  sp.foul = true;
+  sp.landDist = 0;
+  sp.throwPhase = "landed";
+  sp.resultTimer = 1.8;
+  Audio.thud();
+}
+
+function finishShotPut(){
+  const ev = run.ev;
+  const best = run.sp.bestDist;
   run.Qualified = (best >= ev.qualifyDist);
   run.newWR = (best > ev.wrDist);
   let pts = 0;
