@@ -91,6 +91,16 @@ function drawJavelinSprite(px, py, angle){
   ctx.restore();
 }
 
+function drawHighJumpBar(px, barTopY){
+  ctx.fillStyle = P.white;
+  ctx.fillRect(px-12, barTopY, 2, 158 - barTopY);
+  ctx.fillRect(px+10, barTopY, 2, 158 - barTopY);
+  ctx.fillStyle = P.red;
+  ctx.fillRect(px-14, barTopY, 28, 2);
+  ctx.fillStyle = "rgba(255,255,255,0.4)";
+  ctx.fillRect(px-12, barTopY-2, 24, 2);
+}
+
 function drawAngleIndicator(cx, cy, angle){
   ctx.save();
   ctx.translate(cx, cy);
@@ -164,7 +174,7 @@ function drawScoreboard(){
   ctx.fillStyle = P.yellow; ctx.font="7px monospace"; ctx.textAlign="left";
   ctx.fillText(ev.name, 16, 19);
   ctx.fillStyle = P.white;
-  if (ev.type === "longjump") {
+  if (ev.type === "longjump" || ev.type === "javelin" || ev.type === "shotput" || ev.type === "highjump") {
     ctx.fillText("WR   : "+ev.wrDist.toFixed(2)+"m", 16, 28);
     ctx.fillText("QUAL : "+ev.qualifyDist.toFixed(2)+"m", 16, 36);
   } else {
@@ -335,6 +345,127 @@ function renderTrack(){
     }
     return;
   }
+  if (ev.type === "shotput") {
+    const mToPx = (VIEW_W-40) / ev.distance;
+    const boardPx = 20 + ev.boardAt*mToPx - run.scroll;
+    drawRunningSurface();
+    ctx.fillStyle = P.red;
+    ctx.fillRect(boardPx-1, TRACK_LANE_TOP+2, 3, TRACK_LANE_BOT-TRACK_LANE_TOP-2);
+    ctx.fillStyle = P.yellow;
+    ctx.font = "6px monospace"; ctx.textAlign = "center";
+    ctx.fillText("BOARD", boardPx, TRACK_LANE_TOP-2);
+    ctx.fillStyle = P.trackLine;
+    for (let m=1;m<=ev.distance;m++){
+      const px = 20 + m*mToPx - run.scroll;
+      if (px < 0 || px > VIEW_W) continue;
+      ctx.fillRect(px|0, TRACK_LANE_TOP+1, 1, TRACK_LANE_BOT-TRACK_LANE_TOP-1);
+      if (scene===Scene.RACE||scene===Scene.FINISH){
+        ctx.fillStyle = "#000a"; ctx.fillRect(px-8,170,16,8);
+        ctx.fillStyle = P.yellow; ctx.font = "6px monospace"; ctx.textAlign="center";
+        ctx.fillText(m+"m", px, 177);
+        ctx.fillStyle = P.trackLine;
+      }
+    }
+    const sp = run.sp;
+    const playerScreenX = 20 + run.player.x*mToPx - run.scroll;
+    drawAthlete(playerScreenX, 158, run.player.frameIdx, 1, P.p1);
+    ctx.fillStyle = "#000a"; ctx.fillRect(playerScreenX-9,168,18,8);
+    ctx.fillStyle = P.white; ctx.font="6px monospace"; ctx.textAlign="center";
+    ctx.fillText("P1", playerScreenX, 174);
+    if (sp) {
+      ctx.fillStyle = "#000a"; ctx.fillRect(4, 210, 180, 14);
+      ctx.fillStyle = P.white; ctx.font="7px monospace"; ctx.textAlign="left";
+      const bestStr = sp.bestDist > 0 ? sp.bestDist.toFixed(2)+"m" : "--";
+      ctx.fillText("ATTEMPT "+sp.attempt+"/"+ev.attempts+"  BEST "+bestStr, 8, 220);
+      if (sp.throwPhase === "aiming") {
+        drawAngleIndicator(boardPx, 120, sp.throwAngle);
+        ctx.fillStyle = P.yellow; ctx.font = "7px monospace"; ctx.textAlign = "center";
+        ctx.fillText("PRESS TO PUT!", 128, 190);
+      } else if (sp.throwPhase === "flight") {
+        const sx = 20 + sp.spX*mToPx - run.scroll;
+        const sy = 140 - sp.spY * 3;
+        ctx.fillStyle = P.yellow;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 4, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(sx, sy, 2, 0, Math.PI*2);
+        ctx.fill();
+        const curDist = Math.max(0, sp.spX - ev.boardAt);
+        ctx.fillStyle = "#000a"; ctx.fillRect(100, 190, 80, 14);
+        ctx.fillStyle = P.yellow; ctx.font="8px monospace"; ctx.textAlign="center";
+        ctx.fillText(curDist.toFixed(2)+"m", 140, 200);
+      } else if (sp.throwPhase === "landed" && !sp.foul) {
+        const landPx = 20 + (ev.boardAt + sp.landDist)*mToPx - run.scroll;
+        ctx.fillStyle = P.yellow;
+        ctx.beginPath();
+        ctx.arc(landPx, 158, 4, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.arc(landPx, 158, 2, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = "#000a"; ctx.fillRect(100, 190, 80, 14);
+        ctx.fillStyle = P.yellow; ctx.font="10px monospace"; ctx.textAlign="center";
+        ctx.fillText(sp.landDist.toFixed(2)+"m", 140, 202);
+      } else if (sp.throwPhase === "landed" && sp.foul) {
+        ctx.fillStyle = "#000a"; ctx.fillRect(100, 190, 80, 14);
+        ctx.fillStyle = P.red; ctx.font="10px monospace"; ctx.textAlign="center";
+        ctx.fillText("FOUL!", 140, 202);
+      }
+    }
+    return;
+  }
+  if (ev.type === "highjump") {
+    const mToPx = (VIEW_W-40) / ev.distance;
+    const boardPx = 20 + ev.boardAt*mToPx - run.scroll;
+    drawRunningSurface();
+    ctx.fillStyle = P.red;
+    ctx.fillRect(boardPx-1, TRACK_LANE_TOP+2, 3, TRACK_LANE_BOT-TRACK_LANE_TOP-2);
+    ctx.fillStyle = P.yellow;
+    ctx.font = "6px monospace"; ctx.textAlign = "center";
+    ctx.fillText("BAR", boardPx, TRACK_LANE_TOP-2);
+    ctx.fillStyle = P.trackLine;
+    for (let m=5;m<=ev.distance;m+=5){
+      const px = 20 + m*mToPx - run.scroll;
+      if (px < 0 || px > VIEW_W) continue;
+      ctx.fillRect(px|0, TRACK_LANE_TOP+1, 1, TRACK_LANE_BOT-TRACK_LANE_TOP-1);
+      if (scene===Scene.RACE||scene===Scene.FINISH){
+        ctx.fillStyle = "#000a"; ctx.fillRect(px-8,170,16,8);
+        ctx.fillStyle = P.yellow; ctx.font = "6px monospace"; ctx.textAlign="center";
+        ctx.fillText(m+"m", px, 177);
+        ctx.fillStyle = P.trackLine;
+      }
+    }
+    const hj = run.hj;
+    const barTopY = 158 - (hj.barHeight * HIGHJUMP_PIXELS_PER_M);
+    drawHighJumpBar(boardPx, barTopY);
+    const playerScreenX = 20 + run.player.x*mToPx - run.scroll;
+    drawAthlete(playerScreenX, 158, run.player.frameIdx, 1, P.p1, run.player.airborne, run.player.jumpHeight);
+    ctx.fillStyle = "#000a"; ctx.fillRect(playerScreenX-9,168,18,8);
+    ctx.fillStyle = P.white; ctx.font="6px monospace"; ctx.textAlign="center";
+    ctx.fillText("P1", playerScreenX, 174);
+    if (hj) {
+      ctx.fillStyle = "#000a"; ctx.fillRect(4, 210, 190, 14);
+      ctx.fillStyle = P.white; ctx.font="7px monospace"; ctx.textAlign="left";
+      const bestStr = hj.bestHeight > 0 ? hj.bestHeight.toFixed(2)+"m" : "--";
+      ctx.fillText("ATTEMPT "+hj.attempt+"/"+ev.attempts+"  BAR "+hj.barHeight.toFixed(2)+"m  BEST "+bestStr, 8, 220);
+      if (run.phase==="flight") {
+        ctx.fillStyle = P.yellow; ctx.font="8px monospace"; ctx.textAlign="center";
+        ctx.fillText("GO!", 140, 200);
+      } else if (run.phase==="landed" && !hj.foul && hj.cleared) {
+        ctx.fillStyle = "#000a"; ctx.fillRect(100, 190, 80, 14);
+        ctx.fillStyle = P.yellow; ctx.font="10px monospace"; ctx.textAlign="center";
+        ctx.fillText("CLEAR!", 140, 202);
+      } else if (run.phase==="landed") {
+        ctx.fillStyle = "#000a"; ctx.fillRect(100, 190, 80, 14);
+        ctx.fillStyle = P.red; ctx.font="10px monospace"; ctx.textAlign="center";
+        ctx.fillText(hj.foul ? "FOUL!" : "FAILED", 140, 202);
+      }
+    }
+    return;
+  }
   drawRunningSurface();
   const stepM = 10;
   ctx.fillStyle = P.trackLine;
@@ -441,6 +572,16 @@ function renderEventCard(){
     ctx.fillText("QUALIFY DIST   "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
     ctx.fillStyle = P.white; ctx.font="6px monospace";
     ctx.fillText(ev.attempts+" ATTEMPTS  RUN & THROW AT BOARD", 128, 154);
+  } else if (ev.type === "shotput") {
+    ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(2)+"m", 128, 132);
+    ctx.fillText("QUALIFY DIST   "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
+    ctx.fillStyle = P.white; ctx.font="6px monospace";
+    ctx.fillText(ev.attempts+" ATTEMPTS  RUN & PUT AT BOARD", 128, 154);
+  } else if (ev.type === "highjump") {
+    ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(2)+"m", 128, 132);
+    ctx.fillText("QUALIFY HEIGHT "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
+    ctx.fillStyle = P.white; ctx.font="6px monospace";
+    ctx.fillText(ev.attempts+" ATTEMPTS  RUN & JUMP OVER BAR", 128, 154);
   } else {
     ctx.fillText("WORLD RECORD  "+ev.wrTime.toFixed(2)+'"', 128, 132);
     ctx.fillText("QUALIFY TIME   "+ev.qualifyTime.toFixed(2)+'"', 128, 142);
@@ -472,24 +613,40 @@ function renderFinishOverlay(){
   const t = run.player.finishTime;
   const isLJ = (ev.type === "longjump");
   const isJav = (ev.type === "javelin");
-  const best = isLJ ? run.lj.bestDist : (isJav ? run.jav.bestDist : 0);
+  const isSP = (ev.type === "shotput");
+  const isHJ = (ev.type === "highjump");
+  const best = isLJ ? run.lj.bestDist : (isJav ? run.jav.bestDist : (isSP ? run.sp.bestDist : (isHJ ? run.hj.bestHeight : 0)));
   ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(20,40,216,150);
   ctx.fillStyle = "#0820a0"; ctx.fillRect(28,48,200,134);
   ctx.fillStyle = P.sbLight; ctx.fillRect(30,50,196,130);
   ctx.fillStyle = P.scoreboard; ctx.fillRect(32,52,192,126);
   ctx.fillStyle = P.yellow; ctx.font="12px monospace"; ctx.textAlign="center";
   ctx.fillText(ev.name, 128, 70);
-  if (isLJ || isJav) {
-    const distances = isLJ ? run.lj.distances : run.jav.distances;
-    ctx.fillStyle = P.white; ctx.font="14px monospace";
-    ctx.fillText('BEST '+best.toFixed(2)+'m', 128, 90);
-    ctx.fillStyle = P.yellow; ctx.font="9px monospace";
-    ctx.fillText("RECORD "+ev.wrDist.toFixed(2)+"m", 128, 104);
-    ctx.fillStyle = P.white; ctx.font="7px monospace";
-    for (let i=0;i<distances.length;i++){
-      const d = distances[i];
-      const label = d > 0 ? d.toFixed(2)+"m" : "FOUL";
-      ctx.fillText("ATTEMPT "+(i+1)+": "+label, 128, 116 + i*10);
+  if (isLJ || isJav || isSP || isHJ) {
+    if (isHJ) {
+      const heights = run.hj.heights;
+      ctx.fillStyle = P.white; ctx.font="14px monospace";
+      ctx.fillText('BEST '+best.toFixed(2)+'m', 128, 90);
+      ctx.fillStyle = P.yellow; ctx.font="9px monospace";
+      ctx.fillText("RECORD "+ev.wrDist.toFixed(2)+"m", 128, 104);
+      ctx.fillStyle = P.white; ctx.font="7px monospace";
+      for (let i=0;i<heights.length;i++){
+        const h = heights[i];
+        const label = h > 0 ? h.toFixed(2)+"m" : (h < 0 ? "FOUL" : "FAILED");
+        ctx.fillText("ATTEMPT "+(i+1)+": "+label, 128, 116 + i*10);
+      }
+    } else {
+      const distances = isLJ ? run.lj.distances : (isJav ? run.jav.distances : run.sp.distances);
+      ctx.fillStyle = P.white; ctx.font="14px monospace";
+      ctx.fillText('BEST '+best.toFixed(2)+'m', 128, 90);
+      ctx.fillStyle = P.yellow; ctx.font="9px monospace";
+      ctx.fillText("RECORD "+ev.wrDist.toFixed(2)+"m", 128, 104);
+      ctx.fillStyle = P.white; ctx.font="7px monospace";
+      for (let i=0;i<distances.length;i++){
+        const d = distances[i];
+        const label = d > 0 ? d.toFixed(2)+"m" : "FOUL";
+        ctx.fillText("ATTEMPT "+(i+1)+": "+label, 128, 116 + i*10);
+      }
     }
   } else {
     ctx.fillStyle = P.white; ctx.font="14px monospace";

@@ -9,6 +9,8 @@ const MENU_ITEMS = [
   { label: "110M HURDLES", eventIndex: 1 },
   { label: "LONG JUMP", eventIndex: 2 },
   { label: "JAVELIN THROW", eventIndex: 3 },
+  { label: "SHOT PUT", eventIndex: 4 },
+  { label: "HIGH JUMP", eventIndex: 5 },
 ];
 
 // ---- MENU UPDATE ------------------------------------------------------------
@@ -20,6 +22,12 @@ function updateMenu(dt){
   if (pressedThisFrame["ArrowDown"] || pressedThisFrame["s"] || pressedThisFrame["S"]) {
     menuIndex = Math.min(MENU_ITEMS.length - 1, menuIndex + 1);
     Audio.beep(440);
+  }
+  // scroll wheel
+  if (menuWheelAccum !== 0) {
+    menuIndex = Math.max(0, Math.min(MENU_ITEMS.length - 1, menuIndex + menuWheelAccum));
+    Audio.beep(440);
+    menuWheelAccum = 0;
   }
   // number-key quick select
   for (let i=0;i<MENU_ITEMS.length;i++){
@@ -65,21 +73,21 @@ function renderMenu(){
   ctx.fillText("SELECT AN EVENT", 128, 96);
 
   // event list
-  const listY = 142;
-  const rowH = 18;
+  const listY = 136;
+  const rowH = 15;
   for (let i=0; i<MENU_ITEMS.length; i++){
     const y = listY + i * rowH;
     const selected = (i === menuIndex);
     // highlight bar
     if (selected) {
       ctx.fillStyle = "rgba(255,206,94,0.18)";
-      ctx.fillRect(24, y - 10, 208, rowH);
+      ctx.fillRect(24, y - 8, 208, rowH);
       ctx.fillStyle = P.yellow;
-      ctx.fillRect(24, y - 10, 4, rowH);
+      ctx.fillRect(24, y - 8, 4, rowH);
     }
     // label
     ctx.fillStyle = selected ? P.yellow : P.white;
-    ctx.font = (selected ? "9px " : "8px ") + "monospace";
+    ctx.font = (selected ? "8px " : "7px ") + "monospace";
     ctx.textAlign = "left";
     ctx.fillText((i+1)+".", 32, y + 3);
     ctx.textAlign = "center";
@@ -91,7 +99,8 @@ function renderMenu(){
     if (i === 0) ctx.fillText("PLAY ALL", 220, y + 3);
     else {
       const ev = EVENTS[MENU_ITEMS[i].eventIndex];
-      ctx.fillText(ev.type === "longjump"
+      const isDist = ev.type === "longjump" || ev.type === "javelin" || ev.type === "shotput" || ev.type === "highjump";
+      ctx.fillText(isDist
         ? ev.qualifyDist.toFixed(2)+"m QUAL"
         : ev.qualifyTime.toFixed(2)+'" QUAL', 220, y + 3);
     }
@@ -99,7 +108,7 @@ function renderMenu(){
 
   // controls help
   ctx.fillStyle = P.white; ctx.font="6px monospace"; ctx.textAlign="center";
-  ctx.fillText("UP/DOWN or 1-4 to pick   ENTER to start", 128, 232);
+  ctx.fillText("UP/DOWN or 1-7 to pick   ENTER to start", 128, 232);
 
   // animated athletes
   const f = (blinkT*8 | 0) % 4;

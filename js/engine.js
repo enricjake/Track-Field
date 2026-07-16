@@ -19,6 +19,15 @@ const LONGJUMP_QUALIFY = 7.50;
 const LONGJUMP_WR = 8.90;
 const LONGJUMP_ATTEMPTS = 3;
 const LONGJUMP_PUMP_DIST = 0.16;
+const HIGHJUMP_RUNWAY = 30;
+const HIGHJUMP_BAR_AT = 30;
+const HIGHJUMP_QUALIFY = 2.00;
+const HIGHJUMP_WR = 2.15;
+const HIGHJUMP_ATTEMPTS = 3;
+const HIGHJUMP_START_HEIGHT = 1.60;
+const HIGHJUMP_HEIGHT_STEP = 0.20;
+const HIGHJUMP_PIXELS_PER_M = 40;
+const HIGHJUMP_GRAVITY = 1800;
 
 // ---- SHARED RUN PHYSICS -----------------------------------------------------
 const START_SPEED = 0.0;
@@ -26,6 +35,8 @@ const MAX_SPEED = 0.165;
 const PRESS_GAIN = 0.027;
 const FRICTION = 0.97;
 const CPU_TARGET_TIME_100 = 11.20;
+const SHOTPUT_MAX_SPEED = 0.065;
+const SHOTPUT_PRESS_GAIN = 0.008;
 
 // ---- DOM / CANVAS -----------------------------------------------------------
 const cv = document.getElementById("c");
@@ -46,6 +57,12 @@ window.addEventListener("keydown", e => {
 },{passive:false});
 
 window.addEventListener("keyup", e => { keys[e.key] = false; });
+
+let menuWheelAccum = 0;
+window.addEventListener("wheel", e => {
+  e.preventDefault();
+  menuWheelAccum += Math.sign(e.deltaY);
+},{passive:false});
 
 function consumeRunPress() {
   const leftEdge  = pressedThisFrame["ArrowLeft"]  || pressedThisFrame["z"] || pressedThisFrame["Z"];
@@ -216,6 +233,39 @@ function startRace(){
       foul: false,
       resultTimer: 0,
     } : null,
+    sp: ev.type === "shotput" ? {
+      attempt: 1,
+      bestDist: 0,
+      distances: [],
+      throwX: 0,
+      throwSpeed: 0,
+      throwAngle: 45,
+      angleDir: 1,
+      throwPhase: "idle",
+      spX: 0,
+      spY: 0,
+      spVx: 0,
+      spVy: 0,
+      flightT: 0,
+      flightElapsed: 0,
+      landDist: 0,
+      foul: false,
+      resultTimer: 0,
+    } : null,
+    hj: ev.type === "highjump" ? {
+      attempt: 1,
+      bestHeight: 0,
+      heights: [],
+      takeoffX: 0,
+      takeoffSpeed: 0,
+      jumpVy: 0,
+      flightT: 0,
+      flightElapsed: 0,
+      cleared: false,
+      foul: false,
+      resultTimer: 0,
+      barHeight: ev.startHeight,
+    } : null,
   };
 }
 
@@ -293,7 +343,7 @@ function update(dt){
       cardT -= dt;
       if (cardT <= 0 || enterPressed()) {
         startRace();
-        if (curEvent().type === "longjump" || curEvent().type === "javelin") { run.phase = "runup"; scene = Scene.RACE; }
+        if (curEvent().type === "longjump" || curEvent().type === "javelin" || curEvent().type === "shotput" || curEvent().type === "highjump") { run.phase = "runup"; scene = Scene.RACE; }
         else scene = Scene.COUNTDOWN;
       }
       break;

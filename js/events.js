@@ -61,6 +61,19 @@ registerEvent({
   qualifyTime: 0, wrTime: 0, cpuTargetTime: 0, obstacles: null,
 });
 
+registerEvent({
+  id:"HJUMP", name:"HIGH JUMP",
+  type:"highjump",
+  distance: HIGHJUMP_RUNWAY,
+  boardAt: HIGHJUMP_BAR_AT,
+  startHeight: HIGHJUMP_START_HEIGHT,
+  heightStep: HIGHJUMP_HEIGHT_STEP,
+  qualifyDist: HIGHJUMP_QUALIFY,
+  wrDist: HIGHJUMP_WR,
+  attempts: HIGHJUMP_ATTEMPTS,
+  qualifyTime: 0, wrTime: 0, cpuTargetTime: 0, obstacles: null,
+});
+
 // ---- COUNTDOWN --------------------------------------------------------------
 function updateCountdown(dt){
   consumeRunPress(); consumeJumpPress();
@@ -78,6 +91,7 @@ function updateRace(dt){
   if (run.ev.type === "longjump") { updateLongJump(dt); return; }
   if (run.ev.type === "javelin") { updateJavelin(dt); return; }
   if (run.ev.type === "shotput") { updateShotPut(dt); return; }
+  if (run.ev.type === "highjump") { updateHighJump(dt); return; }
   if (run.phase !== "running") return;
   const ev = run.ev;
 
@@ -326,7 +340,7 @@ function updateShotPut(dt){
     if (press) {
       p.lastPress = press;
       p.presses++;
-      p.vx = Math.min(MAX_SPEED, p.vx + PRESS_GAIN);
+      p.vx = Math.min(SHOTPUT_MAX_SPEED, p.vx + SHOTPUT_PRESS_GAIN);
       p.frameIdx = (p.frameIdx + 1) % 4;
     } else {
       p.vx *= FRICTION;
@@ -560,6 +574,124 @@ function finishJavelin(){
     if (run.newWR) pts += WR_BONUS;
   } else {
     pts = Math.floor(best * 100);
+  }
+  run.awardedScore = pts;
+  addScore(pts);
+  if (!run.Qualified) lives = Math.max(0, lives - 1);
+  run.phase = "done";
+  Audio.cheer();
+  scene = Scene.FINISH;
+}
+
+// ---- HIGH JUMP UPDATE -------------------------------------------------------
+function updateHighJump(dt){
+  const ev = run.ev;
+  const hj = run.hj;
+  const p = run.player;
+
+  if (run.phase === "runup") {
+    const press = consumeRunPress();
+    if (press) {
+      p.lastPress = press;
+      p.presses++;
+      p.vx = Math.min(MAX_SPEED, p.vx + PRESS_GAIN);
+      p.frameIdx = (p.frameIdx + 1) % 4;
+    } else {
+      p.vx *= FRICTION;
+      if (p.vx < 0) p.vx = 0;
+    }
+    p.x += p.vx;
+    run.clock += dt;
+    const mToPx = (VIEW_W-40) / ev.distance;
+    run.scroll = Math.max(0, p.x*mToPx - 60);
+
+    if (consumeJumpPress() && p.x >= ev.boardAt - 1.5) {
+      if (p.x <= ev.boardAt + 0.5 && p.vx > 0.02) {
+        hj.takeoffX = p.x;
+        hj.takeoffSpeed = p.vx;
+        hj.jumpVy = 469 + p.vx * 647;
+        p.airborne = true;
+        p.jumpT = 0;
+        p.jumpHeight = 0;
+        hj.cleared = false;
+        hj.foul = false;
+        hj.flightT = 1.2;
+        hj.flightElapsed = 0;
+        run.phase = "flight";
+        Audio.jumpSfx();
+      } else {
+        foulHighJump();
+      }
+    } else if (p.x > ev.boardAt + 0.5) {
+      foulHighJump();
+    }
+    return;
+  }
+
+  if (run.phase === "flight") {
+    hj.flightElapsed += dt;
+    p.jumpT += dt;
+    const g = HIGHJUMP_GRAVITY;
+    p.jumpHeight = Math.max(0, hj.jumpVy*p.jumpT - 0.5*g*p.jumpT*p.jumpT);
+    const barPx = hj.barHeight * HIGHJUMP_PIXELS_PER_M;
+    p.x += hj.takeoffSpeed * 0.25;
+    if (p.jumpHeight >= barPx && !hj.cleared) {
+      hj.cleared = true;
+      Audio.beep(900);
+    }
+    const mToPx = (VIEW_W-40) / ev.distance;
+    run.scroll = Math.max(0, p.x*mToPx - 60);
+    run.clock += dt;
+    if (hj.flightElapsed >= hj.flightT || (p.jumpHeight <= 0 && hj.flightElapsed > 0.1)) {
+      p.airborne = false;
+      run.phase = "landed";
+      hj.resultTimer = 2.2;
+      Audio.landSfx();
+    }
+    return;
+  }
+
+  if (run.phase === "landed") {
+    hj.resultTimer -= dt;
+    if (hj.resultTimer <= 0 || enterPressed()) {
+      const h = hj.foul ? -1 : (hj.cleared ? hj.barHeight : 0);
+      hj.heights.push(h);
+      if (!hj.foul && hj.cleared && hj.barHeight > hj.bestHeight) {
+        hj.bestHeight = hj.barHeight;
+        hj.barHeight += ev.heightStep;
+      }
+      if (hj.attempt >= ev.attempts) {
+        finishHighJump();
+      } else {
+        hj.attempt++;
+        p.x = 0; p.vx = 0; p.airborne = false; p.jumpHeight = 0;
+        hj.foul = false; hj.cleared = false;
+        run.phase = "runup";
+      }
+    }
+    return;
+  }
+}
+
+function foulHighJump(){
+  const hj = run.hj;
+  hj.foul = true;
+  run.phase = "landed";
+  hj.resultTimer = 1.8;
+  Audio.thud();
+}
+
+function finishHighJump(){
+  const ev = run.ev;
+  const best = run.hj.bestHeight;
+  run.Qualified = (best >= ev.qualifyDist);
+  run.newWR = (best > ev.wrDist);
+  let pts = 0;
+  if (run.Qualified) {
+    pts = SCORE_PER_QUALIFY + Math.floor((best - ev.qualifyDist) * 1000);
+    if (run.newWR) pts += WR_BONUS;
+  } else {
+    pts = Math.floor(best * 500);
   }
   run.awardedScore = pts;
   addScore(pts);

@@ -3,6 +3,12 @@
 Vanilla HTML5 Canvas + JS clone of Konami's Track & Field (Hyper Olympic).
 No dependencies, no build step, no bundler, no package manager, no tests.
 
+## Agent workflow
+
+Before executing any task prompt, **run a quick debug first**:
+inspect the current state of the relevant files, verify the issue or goal,
+and confirm the change will not break existing behaviour. Only then make edits.
+
 ## Running
 
 ```bash

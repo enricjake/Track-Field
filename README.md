@@ -28,19 +28,22 @@ Scripts load in order via `<script>` tags (no modules, no build step).
 ## Menu
 
 The title screen lets you pick:
-- **ALL EVENTS** — progression mode (100m → 110m Hurdles → Long Jump)
+- **ALL EVENTS** — progression mode (100m → 110m Hurdles → Long Jump → Javelin → Shot Put → High Jump)
 - **100M DASH** — play individually
 - **110M HURDLES** — play individually
 - **LONG JUMP** — play individually
+- **JAVELIN THROW** — play individually
+- **SHOT PUT** — play individually
+- **HIGH JUMP** — play individually
 
-Navigate with **↑ / ↓** or press **1-4** directly. **Enter** to confirm.
+Navigate with **↑ / ↓** or press **1-7** directly. **Enter** to confirm.
 
 ## Controls
 
 | Action | Keys |
 |---|---|
 | Run (alternate!) | **← →**  or  **Z X** |
-| Jump hurdle | **↑**  or  **Space** |
+| Jump hurdle / takeoff | **↑**  or  **Space** |
 | Start / Continue | **Enter** |
 | Mute audio | **M** |
 
@@ -59,9 +62,19 @@ The NES Track & Field progresses through a fixed order of events:
 3. **Long Jump** — 40m runway + sand pit. Press **↑ / Space** at the board
    to take off, then alternate **← → / Z X** during the flight to pump and
    extend. 3 attempts, best distance counts. Pass 7.50m to qualify.
+4. **Javelin Throw** — run up and press **↑ / Space** at the board to enter
+   aim mode. The throw angle sweeps back and forth; press **↑ / Space** again
+   to release. 3 attempts, best distance counts. Pass 65.00m to qualify.
+5. **Shot Put** — run up and press **↑ / Space** at the board to enter aim
+   mode. The throw angle sweeps back and forth; press **↑ / Space** again to
+   put the shot. 3 attempts, best distance counts. Pass 15.50m to qualify.
+6. **High Jump** — run up and press **↑ / Space** at the board to jump over
+   the bar. The bar starts at 1.60m and rises 0.20m after each successful
+   clearance. 3 attempts total; if you fail an attempt, the bar does not
+   move. Best cleared height counts. Pass 2.00m to qualify.
 
-Future events planned: javelin, high jump, triple jump, archery, skeet
-shooting — all reusing the run physics core.
+Future events planned: triple jump, archery, skeet shooting — all reusing the
+run physics core.
 
 ## Faithful constants (NES / arcade)
 
@@ -83,6 +96,30 @@ shooting — all reusing the run physics core.
 - **3 attempts**, best distance counts
 - Jump at board with **↑ / Space**, pump with alternating **← → / Z X** during flight
 - Cross the board without jumping = foul (0m for that attempt)
+- Score: **5,000** pts qualifying bonus + **1,000** pts per meter over qualify
+
+### Event 4 — Javelin Throw
+- Runway: **30 m** to the throwing board
+- World record: **89.58 m**
+- Qualifying distance: **65.00 m**
+- **3 attempts**, best distance counts
+- Cross the board without throwing = foul (0m for that attempt)
+- Score: **5,000** pts qualifying bonus + **1,000** pts per meter over qualify
+
+### Event 5 — Shot Put
+- Runway: **5 m** to the throwing board
+- World record: **23.37 m**
+- Qualifying distance: **15.50 m**
+- **3 attempts**, best distance counts
+- Cross the board without putting = foul (0m for that attempt)
+- Score: **5,000** pts qualifying bonus + **1,000** pts per meter over qualify
+
+### Event 6 — High Jump
+- Runway: **30 m** to the bar
+- Starting bar height: **1.60 m**, rises **0.20 m** after each clearance
+- World record: **2.15 m**
+- Qualifying height: **2.00 m**
+- **3 attempts** total; a failed attempt does not raise the bar
 - Score: **5,000** pts qualifying bonus + **1,000** pts per meter over qualify
 
 ### Global rules
