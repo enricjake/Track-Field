@@ -29,6 +29,30 @@ const HIGHJUMP_HEIGHT_STEP = 0.20;
 const HIGHJUMP_PIXELS_PER_M = 40;
 const HIGHJUMP_GRAVITY = 1800;
 
+// ---- TRIPLE JUMP CONSTANTS --------------------------------------------------
+const TRIPLEJUMP_BOARD_AT = 40;
+const TRIPLEJUMP_PIT_LEN = 16;
+const TRIPLEJUMP_QUALIFY = 14.50;
+const TRIPLEJUMP_WR = 18.29;
+const TRIPLEJUMP_ATTEMPTS = 3;
+const TRIPLEJUMP_PUMP_DIST = 0.12;
+
+// ---- ARCHERY CONSTANTS ------------------------------------------------------
+const ARCHERY_QUALIFY = 850;
+const ARCHERY_WR = 1200;
+const ARCHERY_ATTEMPTS = 3;
+const ARCHERY_ROUNDS = 3;
+const ARCHERY_AIM_SPEED = 120;
+const ARCHERY_TARGET_MOVE_SPEED = 0.8;
+
+// ---- SKEET SHOOTING CONSTANTS ------------------------------------------------
+const SKEET_QUALIFY = 20;
+const SKEET_WR = 25;
+const SKEET_ATTEMPTS = 3;
+const SKEET_CLAYS_PER_ROUND = 2;
+const SKEET_CLAY_SPEED = 2.5;
+const SKEET_CLAY_SPAWN_INTERVAL = 1.2;
+
 // ---- SHARED RUN PHYSICS -----------------------------------------------------
 const START_SPEED = 0.0;
 const MAX_SPEED = 0.165;
@@ -41,7 +65,8 @@ const SHOTPUT_PRESS_GAIN = 0.008;
 // ---- DOM / CANVAS -----------------------------------------------------------
 const cv = document.getElementById("c");
 const ctx = cv.getContext("2d");
-ctx.imageSmoothingEnabled = false;
+ctx.imageSmoothingEnabled = true;
+ctx.imageSmoothingQuality = "high";
 
 // ---- INPUT ------------------------------------------------------------------
 const keys = Object.create(null);
@@ -266,6 +291,58 @@ function startRace(){
       resultTimer: 0,
       barHeight: ev.startHeight,
     } : null,
+    tj: ev.type === "triplejump" ? {
+      attempt: 1,
+      bestDist: 0,
+      distances: [],
+      takeoffX: 0,
+      takeoffSpeed: 0,
+      flightT: 0,
+      flightElapsed: 0,
+      pumps: 0,
+      lastPumpKey: null,
+      foul: false,
+      landDist: 0,
+      resultTimer: 0,
+      phase: "hop",
+      hopDist: 0,
+      stepDist: 0,
+      jumpDist: 0,
+    } : null,
+    arch: ev.type === "archery" ? {
+      attempt: 1,
+      round: 1,
+      totalScore: 0,
+      scores: [],
+      aimX: 128,
+      aimY: 120,
+      aimDir: 1,
+      targetX: 128,
+      targetY: 120,
+      targetMoveDir: 1,
+      shootPhase: "idle",
+      resultTimer: 0,
+      arrowX: 0,
+      arrowY: 0,
+      arrowVx: 0,
+      arrowVy: 0,
+      flightT: 0,
+      flightElapsed: 0,
+    } : null,
+    skeet: ev.type === "skeet" ? {
+      attempt: 1,
+      hits: 0,
+      totalHits: 0,
+      clayX: 0,
+      clayY: 0,
+      clayVx: 0,
+      clayVy: 0,
+      clayActive: false,
+      claySpawnTimer: 0,
+      claysThisRound: 0,
+      shootPhase: "idle",
+      resultTimer: 0,
+    } : null,
   };
 }
 
@@ -343,7 +420,7 @@ function update(dt){
       cardT -= dt;
       if (cardT <= 0 || enterPressed()) {
         startRace();
-        if (curEvent().type === "longjump" || curEvent().type === "javelin" || curEvent().type === "shotput" || curEvent().type === "highjump") { run.phase = "runup"; scene = Scene.RACE; }
+        if (curEvent().type === "longjump" || curEvent().type === "javelin" || curEvent().type === "shotput" || curEvent().type === "highjump" || curEvent().type === "triplejump" || curEvent().type === "archery" || curEvent().type === "skeet") { run.phase = "runup"; scene = Scene.RACE; }
         else scene = Scene.COUNTDOWN;
       }
       break;

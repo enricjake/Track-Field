@@ -74,6 +74,39 @@ registerEvent({
   qualifyTime: 0, wrTime: 0, cpuTargetTime: 0, obstacles: null,
 });
 
+registerEvent({
+  id:"TJUMP", name:"TRIPLE JUMP",
+  type:"triplejump",
+  distance: TRIPLEJUMP_BOARD_AT + TRIPLEJUMP_PIT_LEN,
+  boardAt: TRIPLEJUMP_BOARD_AT,
+  qualifyDist: TRIPLEJUMP_QUALIFY,
+  wrDist: TRIPLEJUMP_WR,
+  attempts: TRIPLEJUMP_ATTEMPTS,
+  qualifyTime: 0, wrTime: 0, cpuTargetTime: 0, obstacles: null,
+});
+
+registerEvent({
+  id:"ARCHERY", name:"ARCHERY",
+  type:"archery",
+  distance: 0,
+  boardAt: 0,
+  qualifyDist: ARCHERY_QUALIFY,
+  wrDist: ARCHERY_WR,
+  attempts: ARCHERY_ATTEMPTS,
+  qualifyTime: 0, wrTime: 0, cpuTargetTime: 0, obstacles: null,
+});
+
+registerEvent({
+  id:"SKEET", name:"SKEET SHOOTING",
+  type:"skeet",
+  distance: 0,
+  boardAt: 0,
+  qualifyDist: SKEET_QUALIFY,
+  wrDist: SKEET_WR,
+  attempts: SKEET_ATTEMPTS,
+  qualifyTime: 0, wrTime: 0, cpuTargetTime: 0, obstacles: null,
+});
+
 // ---- COUNTDOWN --------------------------------------------------------------
 function updateCountdown(dt){
   consumeRunPress(); consumeJumpPress();
@@ -92,6 +125,9 @@ function updateRace(dt){
   if (run.ev.type === "javelin") { updateJavelin(dt); return; }
   if (run.ev.type === "shotput") { updateShotPut(dt); return; }
   if (run.ev.type === "highjump") { updateHighJump(dt); return; }
+  if (run.ev.type === "triplejump") { updateTripleJump(dt); return; }
+  if (run.ev.type === "archery") { updateArchery(dt); return; }
+  if (run.ev.type === "skeet") { updateSkeet(dt); return; }
   if (run.phase !== "running") return;
   const ev = run.ev;
 
@@ -696,6 +732,386 @@ function finishHighJump(){
     if (run.newWR) pts += WR_BONUS;
   } else {
     pts = Math.floor(best * 500);
+  }
+  run.awardedScore = pts;
+  addScore(pts);
+  if (!run.Qualified) lives = Math.max(0, lives - 1);
+  run.phase = "done";
+  Audio.cheer();
+  scene = Scene.FINISH;
+}
+
+// ---- TRIPLE JUMP UPDATE ------------------------------------------------------
+function updateTripleJump(dt){
+  const ev = run.ev;
+  const tj = run.tj;
+  const p = run.player;
+
+  if (run.phase === "runup") {
+    const press = consumeRunPress();
+    if (press) {
+      p.lastPress = press;
+      p.presses++;
+      p.vx = Math.min(MAX_SPEED, p.vx + PRESS_GAIN);
+      p.frameIdx = (p.frameIdx + 1) % 4;
+    } else {
+      p.vx *= FRICTION;
+      if (p.vx < 0) p.vx = 0;
+    }
+    p.x += p.vx;
+    run.clock += dt;
+    const mToPx = (VIEW_W-40) / ev.distance;
+    run.scroll = Math.max(0, p.x*mToPx - 60);
+    if (consumeJumpPress() && p.x >= ev.boardAt - 1.5) {
+      if (p.x <= ev.boardAt + 0.5 && p.vx > 0.02) {
+        tj.takeoffX = p.x;
+        tj.takeoffSpeed = p.vx;
+        tj.flightT = 0.45 + p.vx * 5.0;
+        tj.flightElapsed = 0;
+        tj.pumps = 0;
+        tj.lastPumpKey = null;
+        tj.foul = false;
+        tj.phase = "hop";
+        tj.hopDist = 0;
+        tj.stepDist = 0;
+        tj.jumpDist = 0;
+        p.airborne = true;
+        p.jumpT = 0;
+        p.jumpVy = 1.8;
+        run.phase = "flight";
+        Audio.jumpSfx();
+      } else {
+        foulTripleJump();
+      }
+    } else if (p.x > ev.boardAt + 0.5) {
+      foulTripleJump();
+    }
+    return;
+  }
+
+  if (run.phase === "flight") {
+    tj.flightElapsed += dt;
+    const press = consumeRunPress();
+    if (press && press !== tj.lastPumpKey) {
+      tj.lastPumpKey = press;
+      tj.pumps++;
+      Audio.beep(500 + tj.pumps * 60);
+    }
+    p.jumpT += dt;
+    const g = 7.0;
+    p.jumpHeight = Math.max(0, p.jumpVy*p.jumpT - 0.5*g*p.jumpT*p.jumpT);
+    p.x += tj.takeoffSpeed * 0.8;
+    run.clock += dt;
+    const mToPx = (VIEW_W-40) / ev.distance;
+    run.scroll = Math.max(0, p.x*mToPx - 60);
+
+    if (tj.phase === "hop" && (tj.flightElapsed >= tj.flightT || (p.jumpHeight <= 0 && tj.flightElapsed > 0.25))) {
+      const baseDist = Math.max(0, (tj.takeoffSpeed * 60 - 4.5) * 0.5);
+      const pumpBonus = Math.min(tj.pumps, Math.floor(tj.flightT / 0.12)) * TRIPLEJUMP_PUMP_DIST;
+      tj.hopDist = Math.max(0, baseDist + pumpBonus);
+      tj.phase = "step";
+      tj.flightT = 0.40 + tj.takeoffSpeed * 4.5;
+      tj.flightElapsed = 0;
+      tj.pumps = 0;
+      tj.lastPumpKey = null;
+      p.jumpT = 0;
+      p.jumpVy = 1.6;
+      Audio.jumpSfx();
+    }
+
+    if (tj.phase === "step" && (tj.flightElapsed >= tj.flightT || (p.jumpHeight <= 0 && tj.flightElapsed > 0.25))) {
+      const baseDist = Math.max(0, (tj.takeoffSpeed * 60 - 4.5) * 0.5);
+      const pumpBonus = Math.min(tj.pumps, Math.floor(tj.flightT / 0.12)) * TRIPLEJUMP_PUMP_DIST;
+      tj.stepDist = Math.max(0, baseDist + pumpBonus);
+      tj.phase = "jump";
+      tj.flightT = 0.55 + tj.takeoffSpeed * 5.5;
+      tj.flightElapsed = 0;
+      tj.pumps = 0;
+      tj.lastPumpKey = null;
+      p.jumpT = 0;
+      p.jumpVy = 2.0;
+      Audio.jumpSfx();
+    }
+
+    if (tj.phase === "jump" && (tj.flightElapsed >= tj.flightT || (p.jumpHeight <= 0 && tj.flightElapsed > 0.3))) {
+      const baseDist = Math.max(0, (tj.takeoffSpeed * 60 - 4.5) * 0.6);
+      const pumpBonus = Math.min(tj.pumps, Math.floor(tj.flightT / 0.12)) * TRIPLEJUMP_PUMP_DIST;
+      tj.jumpDist = Math.max(0, baseDist + pumpBonus);
+      const earlyLoss = Math.max(0, ev.boardAt - tj.takeoffX);
+      p.x = ev.boardAt + Math.max(0, tj.hopDist + tj.stepDist + tj.jumpDist - earlyLoss);
+      tj.landDist = Math.max(0, p.x - ev.boardAt);
+      p.airborne = false;
+      p.jumpHeight = 0;
+      p.vx = 0;
+      run.scroll = Math.max(0, p.x*((VIEW_W-40)/ev.distance) - 60);
+      Audio.landSfx();
+      run.phase = "landed";
+      tj.resultTimer = 2.2;
+    }
+    return;
+  }
+
+  if (run.phase === "landed") {
+    tj.resultTimer -= dt;
+    if (tj.resultTimer <= 0 || enterPressed()) {
+      tj.distances.push(tj.foul ? 0 : tj.landDist);
+      if (!tj.foul && tj.landDist > tj.bestDist) tj.bestDist = tj.landDist;
+      if (tj.attempt >= ev.attempts) {
+        finishTripleJump();
+      } else {
+        tj.attempt++;
+        p.x = 0; p.vx = 0; p.airborne = false; p.jumpHeight = 0;
+        tj.foul = false;
+        run.phase = "runup";
+      }
+    }
+    return;
+  }
+}
+
+function foulTripleJump(){
+  const tj = run.tj;
+  tj.foul = true;
+  tj.landDist = 0;
+  Audio.thud();
+  run.phase = "landed";
+  tj.resultTimer = 1.8;
+}
+
+function finishTripleJump(){
+  const ev = run.ev;
+  const best = run.tj.bestDist;
+  run.Qualified = (best >= ev.qualifyDist);
+  run.newWR = (best > ev.wrDist);
+  let pts = 0;
+  if (run.Qualified) {
+    pts = SCORE_PER_QUALIFY + Math.floor((best - ev.qualifyDist) * 1000);
+    if (run.newWR) pts += WR_BONUS;
+  } else {
+    pts = Math.floor(best * 100);
+  }
+  run.awardedScore = pts;
+  addScore(pts);
+  if (!run.Qualified) lives = Math.max(0, lives - 1);
+  run.phase = "done";
+  Audio.cheer();
+  scene = Scene.FINISH;
+}
+
+// ---- ARCHERY UPDATE ----------------------------------------------------------
+function updateArchery(dt){
+  const ev = run.ev;
+  const arch = run.arch;
+  const p = run.player;
+
+  if (run.phase === "runup") {
+    if (arch.shootPhase === "idle") {
+      arch.aimX = 128;
+      arch.aimY = 120;
+      arch.targetX = 128;
+      arch.targetY = 120;
+      arch.shootPhase = "aiming";
+      run.clock += dt;
+      return;
+    }
+  }
+
+  if (arch.shootPhase === "aiming") {
+    arch.aimX += arch.aimDir * ARCHERY_AIM_SPEED * dt;
+    if (arch.aimX >= 200) { arch.aimX = 200; arch.aimDir = -1; }
+    if (arch.aimX <= 56) { arch.aimX = 56; arch.aimDir = 1; }
+    
+    arch.aimY += arch.aimDir * ARCHERY_AIM_SPEED * 0.6 * dt;
+    if (arch.aimY >= 160) { arch.aimY = 160; arch.aimDir = -1; }
+    if (arch.aimY <= 80) { arch.aimY = 80; arch.aimDir = 1; }
+
+    arch.targetX += arch.targetMoveDir * ARCHERY_TARGET_MOVE_SPEED * dt;
+    if (arch.targetX >= 180) { arch.targetX = 180; arch.targetMoveDir = -1; }
+    if (arch.targetX <= 76) { arch.targetX = 76; arch.targetMoveDir = 1; }
+
+    arch.targetY += arch.targetMoveDir * ARCHERY_TARGET_MOVE_SPEED * 0.4 * dt;
+    if (arch.targetY >= 140) { arch.targetY = 140; arch.targetMoveDir = -1; }
+    if (arch.targetY <= 100) { arch.targetY = 100; arch.targetMoveDir = 1; }
+
+    if (consumeJumpPress()) {
+      arch.shootPhase = "flight";
+      arch.flightT = 0.3;
+      arch.flightElapsed = 0;
+      arch.arrowX = arch.aimX;
+      arch.arrowY = arch.aimY;
+      const dx = arch.targetX - arch.aimX;
+      const dy = arch.targetY - arch.aimY;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      arch.arrowVx = (dx / dist) * 8;
+      arch.arrowVy = (dy / dist) * 8;
+      Audio.beep(800);
+    }
+    run.clock += dt;
+    return;
+  }
+
+  if (arch.shootPhase === "flight") {
+    arch.flightElapsed += dt;
+    arch.arrowX += arch.arrowVx;
+    arch.arrowY += arch.arrowVy;
+    
+    if (arch.flightElapsed >= arch.flightT) {
+      const dx = arch.arrowX - arch.targetX;
+      const dy = arch.arrowY - arch.targetY;
+      const dist = Math.sqrt(dx*dx + dy*dy);
+      let score = 0;
+      if (dist < 5) score = 100;
+      else if (dist < 10) score = 80;
+      else if (dist < 15) score = 60;
+      else if (dist < 20) score = 40;
+      else if (dist < 25) score = 20;
+      else score = 0;
+      
+      arch.scores.push(score);
+      arch.totalScore += score;
+      arch.shootPhase = "landed";
+      arch.resultTimer = 1.5;
+      Audio.landSfx();
+      if (score > 0) Audio.beep(600 + score);
+    }
+    run.clock += dt;
+    return;
+  }
+
+  if (arch.shootPhase === "landed") {
+    arch.resultTimer -= dt;
+    if (arch.resultTimer <= 0 || enterPressed()) {
+      if (arch.round >= ARCHERY_ROUNDS) {
+        if (arch.attempt >= ev.attempts) {
+          finishArchery();
+        } else {
+          arch.attempt++;
+          arch.round = 1;
+          arch.totalScore = 0;
+          arch.scores = [];
+          arch.shootPhase = "idle";
+          run.phase = "runup";
+        }
+      } else {
+        arch.round++;
+        arch.shootPhase = "idle";
+        run.phase = "runup";
+      }
+    }
+    return;
+  }
+}
+
+function finishArchery(){
+  const ev = run.ev;
+  const best = run.arch.totalScore;
+  run.Qualified = (best >= ev.qualifyDist);
+  run.newWR = (best > ev.wrDist);
+  let pts = 0;
+  if (run.Qualified) {
+    pts = SCORE_PER_QUALIFY + Math.floor((best - ev.qualifyDist) * 10);
+    if (run.newWR) pts += WR_BONUS;
+  } else {
+    pts = Math.floor(best * 5);
+  }
+  run.awardedScore = pts;
+  addScore(pts);
+  if (!run.Qualified) lives = Math.max(0, lives - 1);
+  run.phase = "done";
+  Audio.cheer();
+  scene = Scene.FINISH;
+}
+
+// ---- SKEET SHOOTING UPDATE ---------------------------------------------------
+function updateSkeet(dt){
+  const ev = run.ev;
+  const skeet = run.skeet;
+  const p = run.player;
+
+  if (run.phase === "runup") {
+    if (skeet.shootPhase === "idle") {
+      skeet.hits = 0;
+      skeet.clayActive = false;
+      skeet.claySpawnTimer = 0.5;
+      skeet.claysThisRound = 0;
+      skeet.shootPhase = "shooting";
+      run.clock += dt;
+      return;
+    }
+  }
+
+  if (skeet.shootPhase === "shooting") {
+    skeet.claySpawnTimer -= dt;
+    
+    if (!skeet.clayActive && skeet.claySpawnTimer <= 0 && skeet.claysThisRound < SKEET_CLAYS_PER_ROUND) {
+      skeet.clayActive = true;
+      skeet.claysThisRound++;
+      skeet.clayX = 20;
+      skeet.clayY = 180 + Math.random() * 40;
+      skeet.clayVx = SKEET_CLAY_SPEED + Math.random() * 0.5;
+      skeet.clayVy = -2.5 - Math.random() * 1.0;
+      skeet.claySpawnTimer = SKEET_CLAY_SPAWN_INTERVAL;
+    }
+
+    if (skeet.clayActive) {
+      skeet.clayX += skeet.clayVx;
+      skeet.clayY += skeet.clayVy;
+      
+      if (skeet.clayX > 240 || skeet.clayY < 20 || skeet.clayY > 220) {
+        skeet.clayActive = false;
+      }
+
+      if (consumeJumpPress()) {
+        const dx = skeet.clayX - 128;
+        const dy = skeet.clayY - 120;
+        const dist = Math.sqrt(dx*dx + dy*dy);
+        if (dist < 30 && skeet.clayActive) {
+          skeet.clayActive = false;
+          skeet.hits++;
+          skeet.totalHits++;
+          Audio.gunshot();
+          Audio.beep(700 + skeet.hits * 50);
+        } else {
+          Audio.gunshot();
+        }
+      }
+    }
+
+    run.clock += dt;
+
+    if (skeet.claysThisRound >= SKEET_CLAYS_PER_ROUND && !skeet.clayActive) {
+      skeet.shootPhase = "landed";
+      skeet.resultTimer = 1.5;
+    }
+    return;
+  }
+
+  if (skeet.shootPhase === "landed") {
+    skeet.resultTimer -= dt;
+    if (skeet.resultTimer <= 0 || enterPressed()) {
+      if (skeet.attempt >= ev.attempts) {
+        finishSkeet();
+      } else {
+        skeet.attempt++;
+        skeet.shootPhase = "idle";
+        run.phase = "runup";
+      }
+    }
+    return;
+  }
+}
+
+function finishSkeet(){
+  const ev = run.ev;
+  const best = run.skeet.totalHits;
+  run.Qualified = (best >= ev.qualifyDist);
+  run.newWR = (best > ev.wrDist);
+  let pts = 0;
+  if (run.Qualified) {
+    pts = SCORE_PER_QUALIFY + Math.floor((best - ev.qualifyDist) * 500);
+    if (run.newWR) pts += WR_BONUS;
+  } else {
+    pts = Math.floor(best * 200);
   }
   run.awardedScore = pts;
   addScore(pts);

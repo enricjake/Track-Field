@@ -22,10 +22,12 @@ function drawAthlete(cx, gy, frame, dir, shirt, airborne=false, jumpH=0){
   ctx.translate(cx, gy - jumpH);
   if (airborne) {
     ctx.fillStyle = P.tan;
-    ctx.beginPath(); ctx.arc(0, -27, 4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, -27, 4.5, 0, 7); ctx.fill();
     ctx.fillStyle = shirt;
-    ctx.fillRect(-3, -23, 6, 9);
-    ctx.strokeStyle = "#5c4c3c"; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-4, -23); ctx.lineTo(4, -23); ctx.lineTo(3, -14); ctx.lineTo(-3, -14);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#4a3c2c"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(-1, -14); ctx.lineTo( 5, -10);
     ctx.moveTo( 1, -14); ctx.lineTo( 6, -6);
@@ -37,10 +39,12 @@ function drawAthlete(cx, gy, frame, dir, shirt, airborne=false, jumpH=0){
   } else {
     const legSwing = Math.sin(frame * Math.PI/2) * 4;
     ctx.fillStyle = P.tan;
-    ctx.beginPath(); ctx.arc(0, -26, 4, 0, 7); ctx.fill();
+    ctx.beginPath(); ctx.arc(0, -26, 4.5, 0, 7); ctx.fill();
     ctx.fillStyle = shirt;
-    ctx.fillRect(-3, -22, 6, 10);
-    ctx.strokeStyle = "#5c4c3c"; ctx.lineWidth = 2; ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(-4, -22); ctx.lineTo(4, -22); ctx.lineTo(3, -12); ctx.lineTo(-3, -12);
+    ctx.closePath(); ctx.fill();
+    ctx.strokeStyle = "#4a3c2c"; ctx.lineWidth = 2.5; ctx.lineCap = "round";
     ctx.beginPath();
     ctx.moveTo(-1, -12); ctx.lineTo(-2 - legSwing, -2);
     ctx.moveTo( 1, -12); ctx.lineTo( 2 + legSwing, -2);
@@ -128,7 +132,11 @@ function drawAngleIndicator(cx, cy, angle){
 }
 
 function drawStadium(offsetX){
-  ctx.fillStyle = "#3a5a8a";
+  const grad = ctx.createLinearGradient(0, 50, 0, 78);
+  grad.addColorStop(0, "#4a6a9a");
+  grad.addColorStop(0.5, "#3a5a8a");
+  grad.addColorStop(1, "#2a4a7a");
+  ctx.fillStyle = grad;
   for (let i=0;i<10;i++){
     const x = ((i*52 + offsetX) % (VIEW_W+60)) - 30;
     ctx.fillRect(x, 60, 44, 18);
@@ -143,22 +151,38 @@ function drawStadium(offsetX){
 }
 
 function drawCrowd(offsetX){
-  const colors = [P.crowd, "#ffce5e", "#fcfcfc", "#3868d8"];
-  for (let y=80; y<110; y+=4){
-    for (let x=0; x<VIEW_W; x+=4){
-      const i = ((x/4 + y/4 + (offsetX|0)/4) | 0);
-      if (i % 3 === 0){ ctx.fillStyle = colors[(i>>1)%colors.length]; ctx.fillRect(x,y,3,3); }
-      else { ctx.fillStyle = P.crowdShadow; ctx.fillRect(x,y,3,3); }
+  const colors = [P.crowd, "#ffce5e", "#fcfcfc", "#3868d8", "#61d838", "#e83820"];
+  for (let y=80; y<110; y+=3){
+    for (let x=0; x<VIEW_W; x+=3){
+      const i = ((x/3 + y/3 + (offsetX|0)/3) | 0);
+      if (i % 3 === 0){
+        ctx.fillStyle = colors[(i>>1)%colors.length];
+        ctx.fillRect(x,y,2,2);
+        if (i % 7 === 0){
+          ctx.fillStyle = "#fff";
+          ctx.fillRect(x,y-1,1,1);
+        }
+      } else {
+        ctx.fillStyle = P.crowdShadow;
+        ctx.fillRect(x,y,2,2);
+      }
     }
   }
 }
 
 function drawRunningSurface(){
-  ctx.fillStyle = P.track; ctx.fillRect(0, TRACK_LANE_TOP, VIEW_W, TRACK_LANE_BOT-TRACK_LANE_TOP+4);
-  ctx.fillStyle = P.trackShadow; ctx.fillRect(0,TRACK_LANE_TOP,VIEW_W,2);
+  const trackGrad = ctx.createLinearGradient(0, TRACK_LANE_TOP, 0, TRACK_LANE_BOT+4);
+  trackGrad.addColorStop(0, "#c87c2c");
+  trackGrad.addColorStop(0.3, P.track);
+  trackGrad.addColorStop(0.7, "#a85c0c");
+  trackGrad.addColorStop(1, "#984c0c");
+  ctx.fillStyle = trackGrad;
+  ctx.fillRect(0, TRACK_LANE_TOP, VIEW_W, TRACK_LANE_BOT-TRACK_LANE_TOP+4);
+  ctx.fillStyle = "rgba(0,0,0,0.15)";
+  ctx.fillRect(0,TRACK_LANE_TOP,VIEW_W,2);
   for (let i=0;i<5;i++){
     const y = TRACK_LANE_TOP + i*7;
-    ctx.fillStyle = (i%2)? "rgba(0,0,0,0.18)":"rgba(255,255,255,0.06)";
+    ctx.fillStyle = (i%2)? "rgba(0,0,0,0.12)":"rgba(255,255,255,0.04)";
     ctx.fillRect(0,y,VIEW_W,1);
   }
   ctx.fillStyle = P.trackLine;
@@ -168,13 +192,20 @@ function drawRunningSurface(){
 
 function drawScoreboard(){
   const ev = run.ev;
-  ctx.fillStyle = P.scoreboard; ctx.fillRect(8, 6, 120, 38);
-  ctx.fillStyle = P.sbLight; ctx.fillRect(10,8,116,34);
-  ctx.fillStyle = P.scoreboard; ctx.fillRect(12,10,112,30);
+  ctx.fillStyle = "#0418a0";
+  ctx.fillRect(8, 6, 120, 38);
+  const sbGrad = ctx.createLinearGradient(10, 8, 10, 42);
+  sbGrad.addColorStop(0, "#4878e8");
+  sbGrad.addColorStop(0.5, "#2858c8");
+  sbGrad.addColorStop(1, "#1848b8");
+  ctx.fillStyle = sbGrad;
+  ctx.fillRect(10,8,116,34);
+  ctx.fillStyle = "#0820a0";
+  ctx.fillRect(12,10,112,30);
   ctx.fillStyle = P.yellow; ctx.font="7px monospace"; ctx.textAlign="left";
   ctx.fillText(ev.name, 16, 19);
   ctx.fillStyle = P.white;
-  if (ev.type === "longjump" || ev.type === "javelin" || ev.type === "shotput" || ev.type === "highjump") {
+  if (ev.type === "longjump" || ev.type === "javelin" || ev.type === "shotput" || ev.type === "highjump" || ev.type === "triplejump") {
     ctx.fillText("WR   : "+ev.wrDist.toFixed(2)+"m", 16, 28);
     ctx.fillText("QUAL : "+ev.qualifyDist.toFixed(2)+"m", 16, 36);
   } else {
@@ -184,9 +215,13 @@ function drawScoreboard(){
 }
 
 function drawSandPit(boardPx, pitEndPx){
-  ctx.fillStyle = P.sand;
+  const sandGrad = ctx.createLinearGradient(boardPx, TRACK_LANE_TOP+4, boardPx, TRACK_LANE_BOT);
+  sandGrad.addColorStop(0, "#e4c070");
+  sandGrad.addColorStop(0.5, P.sand);
+  sandGrad.addColorStop(1, "#c4a050");
+  ctx.fillStyle = sandGrad;
   ctx.fillRect(boardPx, TRACK_LANE_TOP+4, pitEndPx - boardPx, TRACK_LANE_BOT - TRACK_LANE_TOP - 4);
-  ctx.fillStyle = P.sandDark;
+  ctx.fillStyle = "rgba(0,0,0,0.08)";
   for (let i=0;i<4;i++){
     const y = TRACK_LANE_TOP + 8 + i * 8;
     ctx.fillRect(boardPx, y, pitEndPx - boardPx, 1);
@@ -211,11 +246,20 @@ function render(){
 }
 
 function renderTrackBg(){
-  ctx.fillStyle = P.sky; ctx.fillRect(0,0,VIEW_W,120);
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, 120);
+  skyGrad.addColorStop(0, "#6ca4fc");
+  skyGrad.addColorStop(0.5, P.sky);
+  skyGrad.addColorStop(1, "#4c84dc");
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0,0,VIEW_W,120);
   drawStadium(0);
   ctx.fillStyle = P.crowd; ctx.fillRect(0,80,VIEW_W,30);
   drawCrowd(0);
-  ctx.fillStyle = P.trackInfield; ctx.fillRect(0,110,VIEW_W,8);
+  const grassGrad = ctx.createLinearGradient(0, 110, 0, 118);
+  grassGrad.addColorStop(0, "#4ab04a");
+  grassGrad.addColorStop(1, "#2a802a");
+  ctx.fillStyle = grassGrad;
+  ctx.fillRect(0,110,VIEW_W,8);
   ctx.fillStyle = P.track; ctx.fillRect(0,TRACK_LANE_TOP,VIEW_W,TRACK_LANE_BOT-TRACK_LANE_TOP+4);
   ctx.fillStyle = P.trackShadow; ctx.fillRect(0,TRACK_LANE_TOP,VIEW_W,2);
 }
@@ -223,13 +267,22 @@ function renderTrackBg(){
 function renderTrack(){
   const ev = run.ev;
   const isLJ = (ev.type === "longjump");
-  ctx.fillStyle = P.sky; ctx.fillRect(0,0,VIEW_W,120);
+  const skyGrad = ctx.createLinearGradient(0, 0, 0, 120);
+  skyGrad.addColorStop(0, "#6ca4fc");
+  skyGrad.addColorStop(0.5, P.sky);
+  skyGrad.addColorStop(1, "#4c84dc");
+  ctx.fillStyle = skyGrad;
+  ctx.fillRect(0,0,VIEW_W,120);
   const parX = -run.scroll*0.15;
   drawStadium(parX);
   ctx.fillStyle = P.crowd; ctx.fillRect(0,80,VIEW_W,30);
   drawCrowd(-run.scroll*0.4);
   drawScoreboard();
-  ctx.fillStyle = P.trackInfield; ctx.fillRect(0,110,VIEW_W,8);
+  const grassGrad = ctx.createLinearGradient(0, 110, 0, 118);
+  grassGrad.addColorStop(0, "#4ab04a");
+  grassGrad.addColorStop(1, "#2a802a");
+  ctx.fillStyle = grassGrad;
+  ctx.fillRect(0,110,VIEW_W,8);
   if (isLJ) {
     const mToPx = (VIEW_W-40) / ev.distance;
     const boardPx = 20 + ev.boardAt*mToPx - run.scroll;
@@ -529,9 +582,16 @@ function renderTrack(){
 
 function renderHUD(){
   const ev = run.ev;
-  ctx.fillStyle = "#0820a0"; ctx.fillRect(180, 6, 70, 38);
-  ctx.fillStyle = P.sbLight; ctx.fillRect(182,8,66,34);
-  ctx.fillStyle = P.scoreboard; ctx.fillRect(184,10,62,30);
+  ctx.fillStyle = "#0418a0";
+  ctx.fillRect(180, 6, 70, 38);
+  const hudGrad = ctx.createLinearGradient(182, 8, 182, 42);
+  hudGrad.addColorStop(0, "#4878e8");
+  hudGrad.addColorStop(0.5, "#2858c8");
+  hudGrad.addColorStop(1, "#1848b8");
+  ctx.fillStyle = hudGrad;
+  ctx.fillRect(182,8,66,34);
+  ctx.fillStyle = "#0820a0";
+  ctx.fillRect(184,10,62,30);
   ctx.fillStyle = P.yellow; ctx.font="7px monospace"; ctx.textAlign="left";
   ctx.fillText("TIME",188,19);
   ctx.fillStyle = P.white; ctx.font="10px monospace";
@@ -553,10 +613,17 @@ function renderHUD(){
 
 function renderEventCard(){
   const ev = curEvent();
-  ctx.fillStyle = "rgba(0,0,0,0.5)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
-  ctx.fillStyle = "#0820a0"; ctx.fillRect(28, 70, 200, 100);
-  ctx.fillStyle = P.sbLight; ctx.fillRect(30,72,196,96);
-  ctx.fillStyle = P.scoreboard; ctx.fillRect(32,74,192,92);
+  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(30, 72, 200, 100);
+  const cardGrad = ctx.createLinearGradient(30, 72, 30, 172);
+  cardGrad.addColorStop(0, "#4878e8");
+  cardGrad.addColorStop(0.5, "#2858c8");
+  cardGrad.addColorStop(1, "#1848b8");
+  ctx.fillStyle = cardGrad;
+  ctx.fillRect(30,72,196,96);
+  ctx.fillStyle = "#0820a0";
+  ctx.fillRect(32,74,192,92);
   ctx.fillStyle = P.yellow; ctx.font="9px monospace"; ctx.textAlign="center";
   ctx.fillText("EVENT  "+(eventIndex+1)+"  OF  "+EVENTS.length, 128, 92);
   ctx.fillStyle = P.white; ctx.font="16px monospace";
@@ -567,6 +634,11 @@ function renderEventCard(){
     ctx.fillText("QUALIFY DIST   "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
     ctx.fillStyle = P.white; ctx.font="6px monospace";
     ctx.fillText(ev.attempts+" ATTEMPTS  RUN & JUMP AT BOARD", 128, 154);
+  } else if (ev.type === "triplejump") {
+    ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(2)+"m", 128, 132);
+    ctx.fillText("QUALIFY DIST   "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
+    ctx.fillStyle = P.white; ctx.font="6px monospace";
+    ctx.fillText(ev.attempts+" ATTEMPTS  HOP STEP JUMP!", 128, 154);
   } else if (ev.type === "javelin") {
     ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(2)+"m", 128, 132);
     ctx.fillText("QUALIFY DIST   "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
@@ -582,6 +654,16 @@ function renderEventCard(){
     ctx.fillText("QUALIFY HEIGHT "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
     ctx.fillStyle = P.white; ctx.font="6px monospace";
     ctx.fillText(ev.attempts+" ATTEMPTS  RUN & JUMP OVER BAR", 128, 154);
+  } else if (ev.type === "archery") {
+    ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(0)+" PTS", 128, 132);
+    ctx.fillText("QUALIFY SCORE  "+ev.qualifyDist.toFixed(0)+" PTS", 128, 142);
+    ctx.fillStyle = P.white; ctx.font="6px monospace";
+    ctx.fillText(ev.attempts+" ATTEMPTS  AIM & SHOOT!", 128, 154);
+  } else if (ev.type === "skeet") {
+    ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(0)+" HITS", 128, 132);
+    ctx.fillText("QUALIFY SCORE  "+ev.qualifyDist.toFixed(0)+" HITS", 128, 142);
+    ctx.fillStyle = P.white; ctx.font="6px monospace";
+    ctx.fillText(ev.attempts+" ATTEMPTS  SHOOT CLAYS!", 128, 154);
   } else {
     ctx.fillText("WORLD RECORD  "+ev.wrTime.toFixed(2)+'"', 128, 132);
     ctx.fillText("QUALIFY TIME   "+ev.qualifyTime.toFixed(2)+'"', 128, 142);
@@ -615,14 +697,24 @@ function renderFinishOverlay(){
   const isJav = (ev.type === "javelin");
   const isSP = (ev.type === "shotput");
   const isHJ = (ev.type === "highjump");
-  const best = isLJ ? run.lj.bestDist : (isJav ? run.jav.bestDist : (isSP ? run.sp.bestDist : (isHJ ? run.hj.bestHeight : 0)));
-  ctx.fillStyle = "rgba(0,0,0,0.6)"; ctx.fillRect(20,40,216,150);
-  ctx.fillStyle = "#0820a0"; ctx.fillRect(28,48,200,134);
-  ctx.fillStyle = P.sbLight; ctx.fillRect(30,50,196,130);
-  ctx.fillStyle = P.scoreboard; ctx.fillRect(32,52,192,126);
+  const isTJ = (ev.type === "triplejump");
+  const isArch = (ev.type === "archery");
+  const isSkeet = (ev.type === "skeet");
+  const best = isLJ ? run.lj.bestDist : (isJav ? run.jav.bestDist : (isSP ? run.sp.bestDist : (isHJ ? run.hj.bestHeight : (isTJ ? run.tj.bestDist : (isArch ? run.arch.totalScore : (isSkeet ? run.skeet.totalHits : 0))))));
+  ctx.fillStyle = "rgba(0,0,0,0.7)"; ctx.fillRect(20,40,216,150);
+  ctx.fillStyle = "#000";
+  ctx.fillRect(30, 50, 200, 134);
+  const finishGrad = ctx.createLinearGradient(30, 50, 30, 184);
+  finishGrad.addColorStop(0, "#4878e8");
+  finishGrad.addColorStop(0.5, "#2858c8");
+  finishGrad.addColorStop(1, "#1848b8");
+  ctx.fillStyle = finishGrad;
+  ctx.fillRect(30,50,196,130);
+  ctx.fillStyle = "#0820a0";
+  ctx.fillRect(32,52,192,126);
   ctx.fillStyle = P.yellow; ctx.font="12px monospace"; ctx.textAlign="center";
   ctx.fillText(ev.name, 128, 70);
-  if (isLJ || isJav || isSP || isHJ) {
+  if (isLJ || isJav || isSP || isHJ || isTJ) {
     if (isHJ) {
       const heights = run.hj.heights;
       ctx.fillStyle = P.white; ctx.font="14px monospace";
@@ -636,7 +728,7 @@ function renderFinishOverlay(){
         ctx.fillText("ATTEMPT "+(i+1)+": "+label, 128, 116 + i*10);
       }
     } else {
-      const distances = isLJ ? run.lj.distances : (isJav ? run.jav.distances : run.sp.distances);
+      const distances = isLJ ? run.lj.distances : (isJav ? run.jav.distances : (isSP ? run.sp.distances : (isTJ ? run.tj.distances : [])));
       ctx.fillStyle = P.white; ctx.font="14px monospace";
       ctx.fillText('BEST '+best.toFixed(2)+'m', 128, 90);
       ctx.fillStyle = P.yellow; ctx.font="9px monospace";
@@ -647,6 +739,16 @@ function renderFinishOverlay(){
         const label = d > 0 ? d.toFixed(2)+"m" : "FOUL";
         ctx.fillText("ATTEMPT "+(i+1)+": "+label, 128, 116 + i*10);
       }
+    }
+  } else if (isArch || isSkeet) {
+    ctx.fillStyle = P.white; ctx.font="14px monospace";
+    ctx.fillText('SCORE '+best+' PTS', 128, 90);
+    ctx.fillStyle = P.yellow; ctx.font="9px monospace";
+    ctx.fillText("QUALIFY "+ev.qualifyDist.toFixed(0)+" PTS", 128, 104);
+    ctx.fillStyle = P.white; ctx.font="7px monospace";
+    const scores = isArch ? run.arch.scores : run.skeet.hits;
+    for (let i=0;i<scores.length;i++){
+      ctx.fillText("ATTEMPT "+(i+1)+": "+scores[i]+" PTS", 128, 116 + i*10);
     }
   } else {
     ctx.fillStyle = P.white; ctx.font="14px monospace";
@@ -684,7 +786,7 @@ function renderFinishOverlay(){
 }
 
 function renderGameOver(){
-  ctx.fillStyle = "rgba(0,0,0,0.75)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
+  ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,VIEW_W,VIEW_H);
   ctx.fillStyle = P.red; ctx.font="24px monospace"; ctx.textAlign="center";
   ctx.fillText("GAME  OVER", VIEW_W/2, 100);
   ctx.fillStyle = P.yellow; ctx.font="10px monospace";
