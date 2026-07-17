@@ -347,27 +347,29 @@ function updateShotPut(dt){
       if (p.vx < 0) p.vx = 0;
     }
     p.x += p.vx;
-    run.clock += dt;
     const mToPx = (VIEW_W-40) / ev.distance;
     run.scroll = Math.max(0, p.x*mToPx - 60);
 
-    if (consumeJumpPress() && p.x >= ev.boardAt - 1.5) {
-      if (p.x <= ev.boardAt + 0.5 && p.vx > 0.02) {
-        sp.throwX = p.x;
-        sp.throwSpeed = p.vx;
-        sp.throwAngle = 45;
-        sp.angleDir = 1;
-        sp.throwPhase = "aiming";
-        p.airborne = false;
-        p.vx = 0;
-        Audio.jumpSfx();
-      } else {
+    if (sp.throwPhase === "idle") {
+      run.clock += dt;
+      if (consumeJumpPress() && p.x >= ev.boardAt - 1.5) {
+        if (p.x <= ev.boardAt + 0.5 && p.vx > 0.02) {
+          sp.throwX = p.x;
+          sp.throwSpeed = p.vx;
+          sp.throwAngle = 45;
+          sp.angleDir = 1;
+          sp.throwPhase = "aiming";
+          p.airborne = false;
+          p.vx = 0;
+          Audio.jumpSfx();
+        } else {
+          foulShotPut();
+        }
+      } else if (p.x > ev.boardAt + 0.5) {
         foulShotPut();
       }
-    } else if (p.x > ev.boardAt + 0.5) {
-      foulShotPut();
+      return;
     }
-    return;
   }
 
   if (sp.throwPhase === "aiming") {
@@ -474,27 +476,29 @@ function updateJavelin(dt){
       if (p.vx < 0) p.vx = 0;
     }
     p.x += p.vx;
-    run.clock += dt;
     const mToPx = (VIEW_W-40) / ev.distance;
     run.scroll = Math.max(0, p.x*mToPx - 60);
 
-    if (consumeJumpPress() && p.x >= ev.boardAt - 1.5) {
-      if (p.x <= ev.boardAt + 0.5 && p.vx > 0.02) {
-        jav.throwX = p.x;
-        jav.throwSpeed = p.vx;
-        jav.throwAngle = 45;
-        jav.angleDir = 1;
-        jav.throwPhase = "aiming";
-        p.airborne = false;
-        p.vx = 0;
-        Audio.jumpSfx();
-      } else {
+    if (jav.throwPhase === "idle") {
+      run.clock += dt;
+      if (consumeJumpPress() && p.x >= ev.boardAt - 1.5) {
+        if (p.x <= ev.boardAt + 0.5 && p.vx > 0.02) {
+          jav.throwX = p.x;
+          jav.throwSpeed = p.vx;
+          jav.throwAngle = 45;
+          jav.angleDir = 1;
+          jav.throwPhase = "aiming";
+          p.airborne = false;
+          p.vx = 0;
+          Audio.jumpSfx();
+        } else {
+          foulJavelin();
+        }
+      } else if (p.x > ev.boardAt + 0.5) {
         foulJavelin();
       }
-    } else if (p.x > ev.boardAt + 0.5) {
-      foulJavelin();
+      return;
     }
-    return;
   }
 
   if (jav.throwPhase === "aiming") {

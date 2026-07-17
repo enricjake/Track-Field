@@ -571,12 +571,12 @@ function renderEventCard(){
     ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(2)+"m", 128, 132);
     ctx.fillText("QUALIFY DIST   "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
     ctx.fillStyle = P.white; ctx.font="6px monospace";
-    ctx.fillText(ev.attempts+" ATTEMPTS  RUN & THROW AT BOARD", 128, 154);
+    ctx.fillText(ev.attempts+" ATTEMPTS  RUN, JUMP TO AIM, JUMP TO THROW", 128, 154);
   } else if (ev.type === "shotput") {
     ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(2)+"m", 128, 132);
     ctx.fillText("QUALIFY DIST   "+ev.qualifyDist.toFixed(2)+"m", 128, 142);
     ctx.fillStyle = P.white; ctx.font="6px monospace";
-    ctx.fillText(ev.attempts+" ATTEMPTS  RUN & PUT AT BOARD", 128, 154);
+    ctx.fillText(ev.attempts+" ATTEMPTS  RUN, JUMP TO AIM, JUMP TO PUT", 128, 154);
   } else if (ev.type === "highjump") {
     ctx.fillText("WORLD RECORD  "+ev.wrDist.toFixed(2)+"m", 128, 132);
     ctx.fillText("QUALIFY HEIGHT "+ev.qualifyDist.toFixed(2)+"m", 128, 142);

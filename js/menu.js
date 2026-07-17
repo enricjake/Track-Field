@@ -73,8 +73,8 @@ function renderMenu(){
   ctx.fillText("SELECT AN EVENT", 128, 96);
 
   // event list
-  const listY = 136;
-  const rowH = 15;
+  const listY = 134;
+  const rowH = 14;
   for (let i=0; i<MENU_ITEMS.length; i++){
     const y = listY + i * rowH;
     const selected = (i === menuIndex);
